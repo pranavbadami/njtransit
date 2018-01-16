@@ -1,38 +1,38 @@
-New Bridge Landing
-Newark Broad St
-Ridgewood
-South Amboy
-Plainfield
-Newark Penn
-Peapack
-Murray Hil
-Newark Airport
-Bay Head
-Maplewood
-Rahway
-Bay St (Montclair)
-Long Branch
-Princeton Junction
-Waldwick
-Philadelphia 30th St
-Princeton
-Montclair State University
-High Bridge
-Hackettstown
-Lake Hopatcong
-Hoboken
-Gladstone
-Raritan
-New Brunswick
-Suffern
-Dover
-Trenton
-Metropark
-Bernardsville
-Atlantic City
-Spring Valley
-Summit
-Mount Olive
-Jersey Ave
-New York Penn
-Port Jervis
+{"New Bridge Landing":{"abbrev": "NH", "freq":3600},
+"Newark Broad St":{"abbrev": "ND", "freq":1800},
+"Ridgewood":{"abbrev": "RW", "freq":3600},
+"South Amboy":{"abbrev": "CH", "freq":3600},
+"Plainfield":{"abbrev": "PF", "freq":3600},
+"Newark Penn":{"abbrev": "NP", "freq":300},
+"Peapack":{"abbrev": "PC", "freq":3600},
+"Murray Hill":{"abbrev": "MH", "freq":3600},
+"Newark Airport":{"abbrev": "NA", "freq":900},
+"Bay Head":{"abbrev": "BH", "freq":3600},
+"Maplewood":{"abbrev": "MW", "freq":3600},
+"Rahway":{"abbrev": "RH", "freq":1800},
+"Bay St (Montclair)":{"abbrev": "MC", "freq":3600},
+"Long Branch":{"abbrev": "LB", "freq":3600},
+"Princeton Junction":{"abbrev": "PJ", "freq":900},
+"Waldwick":{"abbrev": "WK", "freq":3600},
+"Philadelphia 30th St":{"abbrev": "PH", "freq":300},
+"Princeton":{"abbrev": "PR", "freq":3600},
+"Montclair State University":{"abbrev": "UV", "freq":3600},
+"High Bridge":{"abbrev": "HG", "freq":3600},
+"Hackettstown":{"abbrev": "HQ", "freq":1800},
+"Lake Hopatcong":{"abbrev": "HP", "freq":3600},
+"Hoboken":{"abbrev": "HB", "freq":1800},
+"Gladstone":{"abbrev": "GL", "freq":3600},
+"Raritan":{"abbrev": "RA", "freq":1800},
+"New Brunswick:{"abbrev":  "NB", "freq":1800},
+"Suffern":{"abbrev": "SF", "freq":3600},
+"Dover":{"abbrev": "DO", "freq":1800},
+"Trenton":{"abbrev": "TR", "freq":300},
+"Metropark":{"abbrev": "MP", "freq":1800},
+"Bernardsville:{"abbrev":  "BV", "freq":3600},
+"Atlantic City":{"abbrev": "AC", "freq":3600},
+"Spring Valley:{"abbrev":  "SV", "freq":3600},
+"Summit":{"abbrev": "ST", "freq":3600},
+"Mount Olive:{"abbrev":  "OL", "freq":3600},
+"Jersey Ave":{"abbrev": "JA", "freq":3600},
+"New York Penn":{"abbrev": "NY", "freq":300},
+"Port Jervis:{"abbrev": "PO", "freq":1800}}
