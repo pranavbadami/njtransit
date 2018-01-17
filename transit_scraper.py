@@ -108,7 +108,7 @@ class TerminalScraper:
 		else:
 			trains = []
 			for table in tables:
-				if table.parent.name == 'td':
+				if table.parent.name == 'a':
 					row = table
 					cells = row.find_all('td')
 					trains.append(cells[TRAIN_COLUMN].text)
