@@ -3,14 +3,18 @@ import requests
 from bs4 import BeautifulSoup
 import time
 import pandas as pd
+from rail_data import dv_station_names as dv
+import re
+import json
 
+ALL_STATIONS = dv.ALL_STATIONS
 TERMINALS = {
 	"New Bridge Landing":{"abbrev": "NH", "freq":3600},
 	"Newark Broad St":{"abbrev": "ND", "freq":1800},
 	"Ridgewood":{"abbrev": "RW", "freq":3600},
 	"South Amboy":{"abbrev": "CH", "freq":3600},
 	"Plainfield":{"abbrev": "PF", "freq":3600},
-	"Newark Penn":{"abbrev": "NP", "freq":300},
+	"Newark Penn Station":{"abbrev": "NP", "freq":300},
 	"Peapack":{"abbrev": "PC", "freq":3600},
 	"Murray Hill":{"abbrev": "MH", "freq":3600},
 	"Newark Airport":{"abbrev": "NA", "freq":900},
@@ -41,66 +45,58 @@ TERMINALS = {
 	"Summit":{"abbrev": "ST", "freq":3600},
 	"Mount Olive":{"abbrev":  "OL", "freq":3600},
 	"Jersey Ave":{"abbrev": "JA", "freq":3600},
-	"New York Penn":{"abbrev": "NY", "freq":300},
+	"New York Penn Station":{"abbrev": "NY", "freq":300},
 	"Port Jervis":{"abbrev": "PO", "freq":1800}
 }
+
+
 
 TRAIN_COLUMN = 4
 LINE_COLUMN = 3
 RAIL_DATA = "./rail_data/"
 
 trip_stops = pd.DataFrame()
+trips = pd.read_csv(RAIL_DATA + 'trips.txt')
+stop_times = pd.read_csv(RAIL_DATA + 'stop_times.txt')
+trip_stops = stop_times.merge(trips, on=['trip_id'])
 
-class Amtrak:
+
+class Train:
 	url = "http://dv.njtransit.com/mobile/train_stops.aspx?train="
 	freq = 60
-	buffer_mins = 30 #research time between philly and trenton
+	buffer_mins = 2
+	statuses = ["DEPARTED", "Cancelled"]
+	time_re = re.compile(".*(\d+):(\d+).*")
 
 	def __init__(self, train_id, line):
 		self.id = train_id
 		self.line = line
 		self.created_at = datetime.now()
-
-		self.data = []
-		# self.t_scrape = self.get_t_scrape()
-		self.type = "Amtrak"
-		self.scrape_count = 0
-
-	def __str__(self):
-		return "Train #{}, {}".format(self.id, self.line)
-
-
-class NJTransit:
-	url = "http://dv.njtransit.com/mobile/train_stops.aspx?train="
-	freq = 60
-	buffer_mins = 2
-
-	def __init__(self, train_id, line):
-		self.id = train_id.zfill(4)
-		self.line = line
-		self.created_at = datetime.now()
 		self.scrape_count = 0
 		self.data = []
-		self.type = "NJ Transit"
+		self.type = self.get_type()
+		if self.type == "NJ Transit":
+			self.id = train_id.zfill(4) #TODO: format id
 
 		self.t_scrape = self.get_t_scrape()
+		self.completed = False
 
 	def __str__(self):
 		return "Train #{}, {}, next scrape: {}".format(self.id, self.line, self.t_scrape)
 
-	# def get_type(self):
-	# 	try:
-	# 		is_int = int(self.id) 
-	# 		return "NJ Transit"
-	# 	except ValueError: 
-	# 		return "Amtrak"
+	def get_type(self):
+		try:
+			is_int = int(self.id)
+			return "NJ Transit"
+		except ValueError: 
+			return "Amtrak"
 
 	def parse_table(self, soup):
 		table = soup.find('table')
-		return [td.text for timedelta in table.find_all('td')]
-
-	def stop_scraping(self):
-		stop = True
+		if table is not None:
+			return [td.text for td in table.find_all('td')]
+		else:
+			return []
 
 	def schedule_datetime(self, scheduled):
 		hours, minutes, seconds = scheduled.split(":")
@@ -110,33 +106,117 @@ class NJTransit:
 							day=self.created_at.day)
 		return midnight + timedelta(hours=hours, minutes=minutes)
 
+	def get_scheduled_time(self):
+		try:
+			scheduled = trip_stops[trip_stops['block_id'] == self.id]['arrival_time'].iloc[0]
+			scheduled = self.schedule_datetime(scheduled) - timedelta(minutes=self.buffer_mins)
+			if datetime.now() > scheduled:
+				scheduled = datetime.now()
+			return scheduled
+		except IndexError:
+			# train not in schedule
+			return None
+
+	def parse_time(self, hour, minute):
+		hour, minute = int(hour), int(minute)
+		evening_hour = hour + 12
+
+		if hour >= self.created_at.hour:
+			#only possible in morning
+			return datetime(year=self.created_at.year, month=self.created_at.month,
+							day=self.created_at.day, hour=hour, minute=minute-30)
+		else:
+			if evening_hour >= self.created_at.hour:
+				return datetime(year=self.created_at.year, month=self.created_at.month,
+							day=self.created_at.day, hour=evening_hour, minute=minute-30)
+			else:
+				return datetime(year=self.created_at.year, month=self.created_at.month,
+							day=self.created_at.day) + timedelta(days=1, hours=hour, minutes=minute-30)
+
+	def approx_scheduled_time(self):
+		print "getting approx time", self.id
+		stops = self.request(retry=True)
+		for idx, stop in enumerate(stops):
+			try:
+				station, status = stop.split(u"\xa0\xa0")
+				if station in ALL_STATIONS:
+					if station == "Philadelphia":
+						stop = stops[idx + 1]
+						station, status = stop.split(u"\xa0\xa0")
+
+					if ("DEPARTED" in status) or ("Cancelled" in status):
+						return datetime.now()
+					else:
+						match = self.time_re.match(status)
+						if match is not None:
+							return self.parse_time(match.group(1), match.group(2))
+						else:
+							return datetime.now()
+			except ValueError:
+				return datetime.now()
+		# no table, scrape every ten mins until table appears
+		return datetime.now() + timedelta(minutes=10)
+
+	def stop_scraping(self):
+		latest_data = self.data[-1][1]
+		left_system = True
+
+		for stop in latest_data:
+			try:
+				station, status = stop.split(u"\xa0\xa0")
+				if station in ALL_STATIONS:
+					left_system = left_system & (("DEPARTED" in status) or ("Cancelled" in status))
+			except ValueError:
+				pass
+		return left_system
+
+
 	def get_t_scrape(self):
 		if self.scrape_count == 0:
-			if self.type == "NJ Transit":
-				try:
-					scheduled = trip_stops[trip_stops['block_id'] == self.id]['arrival_time'].iloc[0]
-					scheduled = self.schedule_datetime(scheduled) - timedelta(minutes=self.buffer_mins)
-					if datetime.now() > scheduled:
-						scheduled = datetime.now()
-					return scheduled
-				except:
-					print "exception for", self.id, self.line
-					return datetime.now()
+			scheduled = self.get_scheduled_time()
+			if scheduled is None:
+				scheduled = self.approx_scheduled_time()
+			return scheduled
 		else:
+			if self.stop_scraping():
+				self.completed = True
+				return None
 			return self.t_scrape + timedelta(seconds=self.freq)
+
+	def request(self, timeout=3, retry=False):
+		try:
+			resp = requests.get(self.url + self.id, timeout=timeout)
+			if resp.status_code == 200:
+				soup = BeautifulSoup(resp.text, "lxml")
+				status = self.parse_table(soup)
+				return status
+			else:
+				print "response code {} for {} at {}".format(resp.status_code, self.id, datetime.now())
+				return None
+		except requests.exceptions.ReadTimeout:
+			if retry:
+				print "retrying"
+				return self.request(timeout=timeout, retry=True)
+			else:
+				return None
 
 	def scrape(self):
 		now = datetime.now()
-		try:
-			resp = requests.get(self.url + self.id, timeout=3)
-			if resp.status_code == 200:
-				self.scrape_count = self.scrape_count + 1
-				soup = BeautifulSoup(resp.text, "html")
-				status = self.parse_table(soup)
-				self.data.append([now, status])
-				self.t_scrape = self.get_t_scrape()
-		except requests.exceptions.ReadTimeout:
-			pass
+		data = self.request()
+		if data is not None:
+			self.scrape_count = self.scrape_count + 1
+			self.data.append([now, data])
+			self.t_scrape = self.get_t_scrape()
+
+	def write_to_file(self):
+		data_dict = {"id": self.id, "line": self.line, 
+					 "created_at": self.created_at, "type": self.type, 
+					 "scrape_count": self.scrape_count, "data": self.data}
+
+		file_name = 'test/{}_{}'.format(self.created_at.strftime("%Y_%m_%d"), 
+										self.id)
+		with open(file_name, 'w+') as outfile:
+			json.dump(data_dict, outfile, default=str)
 
 
 class TerminalScraper:
@@ -170,7 +250,7 @@ class TerminalScraper:
 		try:
 			resp = requests.get(self.terminal_url + abbrev, timeout=3)
 			if resp.status_code == 200:
-				soup = BeautifulSoup(resp.text, "html")
+				soup = BeautifulSoup(resp.text, "lxml")
 				return self.parse_table(soup)
 			else:
 				return []
@@ -189,19 +269,15 @@ class TerminalScraper:
 	def find_new_trains(self, trains):
 		new_trains = []
 		for train in trains:
-			if not train['train_id'] in self.current_trains:
-				new_trains.append(train)
+			if "S" not in train['train_id']:
+				if not train['train_id'] in self.current_trains:
+					new_trains.append(train)
 		return new_trains
 
 	def create_new_trains(self, trains):
 		for train in trains:
-			train_type = self.get_train_type(train['train_id'])
-			if train_type == "NJ Transit":
-				train_obj = NJTransit(train['train_id'], train['line'])
-			else:
-				train_obj = Amtrak(train['train_id'], train['line'])
+			train_obj = Train(train['train_id'], train['line'])
 			self.current_trains[train['train_id']] = train_obj
-			print train_obj
 
 	def scrape_terminals(self, terminals):
 		all_trains = []
@@ -214,10 +290,6 @@ class TerminalScraper:
 			all_trains = all_trains + trains
 		return all_trains
 
-	#TODO: implement
-	def scrape_trains(self, trains):
-		pass
-		
 	def run(self):
 		loop_count = 1
 		while True:
@@ -232,25 +304,28 @@ class TerminalScraper:
 			all_trains = self.scrape_terminals(scrape_terms)
 			new_trains = self.find_new_trains(all_trains)
 			self.create_new_trains(new_trains)
-			#identify trains to scrape
-			# scrape_trains = []
-			# for train, info in self.current_trains.iteritems():
-			# 	if (info['t_scrape'] <= self.time):
-			# 		scrape_trains.append(train)
 
+			completed = []
+			for train_id, train in self.current_trains.iteritems():
+				if train.completed:
+					print "completed", train_id
+					self.completed_trains[train_id] = train
+					completed.append(train_id)
+					train.write_to_file()
+				else:
+					if (train.t_scrape <= self.time):
+						train.scrape()
+			
+			for c in completed:
+				self.current_trains.pop(c, 0)
 			# self.scrape_trains(scrape_trains)
-
-			print "loop count:", loop_count
+			if not (loop_count % 50):
+				print "loop count:", loop_count
 			loop_count = loop_count + 1
 			time.sleep(10)
 
+
 def main():
-	global trip_stops
-
-	trips = pd.read_csv(RAIL_DATA + 'trips.txt')
-	stop_times = pd.read_csv(RAIL_DATA + 'stop_times.txt')
-	trip_stops = stop_times.merge(trips, on=['trip_id'])
-
 	scraper = TerminalScraper()
 	scraper.run()
 
