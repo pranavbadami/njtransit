@@ -256,6 +256,7 @@ class TerminalScraper:
 				return []
 		except requests.exceptions.ReadTimeout:
 			print "request for", abbrev, "timed out"
+			return []
 
 
 	def get_train_type(self, train_id):

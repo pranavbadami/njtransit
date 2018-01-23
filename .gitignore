@@ -5,3 +5,5 @@ test_1/
 *.pyc
 
 .ipynb_checkpoints/
+
+.DS_Store
