@@ -64,7 +64,6 @@ trip_stops = stop_times.merge(trips, on=['trip_id'])
 class Train:
 	url = "http://dv.njtransit.com/mobile/train_stops.aspx?train="
 	freq = 60
-	buffer_mins = 2
 	statuses = ["DEPARTED", "Cancelled"]
 	time_re = re.compile(".*(\d+):(\d+).*")
 
@@ -77,6 +76,9 @@ class Train:
 		self.type = self.get_type()
 		if self.type == "NJ Transit":
 			self.id = train_id.zfill(4) #TODO: format id
+			self.buffer_mins = 2
+		else:
+			self.buffer_mins = 30
 
 		self.t_scrape = self.get_t_scrape()
 		self.completed = False
@@ -124,14 +126,14 @@ class Train:
 		if hour >= self.created_at.hour:
 			#only possible in morning
 			return datetime(year=self.created_at.year, month=self.created_at.month,
-							day=self.created_at.day, hour=hour, minute=minute-30)
+							day=self.created_at.day, hour=hour, minute=minute) - timedelta(minutes=self.buffer_mins)
 		else:
 			if evening_hour >= self.created_at.hour:
 				return datetime(year=self.created_at.year, month=self.created_at.month,
-							day=self.created_at.day, hour=evening_hour, minute=minute-30)
+							day=self.created_at.day, hour=evening_hour, minute=minute) - timedelta(minutes=self.buffer_mins)
 			else:
 				return datetime(year=self.created_at.year, month=self.created_at.month,
-							day=self.created_at.day) + timedelta(days=1, hours=hour, minutes=minute-30)
+							day=self.created_at.day) + timedelta(days=1, hours=hour, minutes=minute) - timedelta(minutes=self.buffer_mins)
 
 	def approx_scheduled_time(self):
 		print "getting approx time", self.id
