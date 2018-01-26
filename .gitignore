@@ -1,9 +1,9 @@
-test/
-
-test_1/
+test*/
 
 *.pyc
 
 .ipynb_checkpoints/
 
 .DS_Store
+
+rail_data/*.pyc
