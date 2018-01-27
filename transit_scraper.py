@@ -232,6 +232,7 @@ class TerminalScraper:
 
 		self.current_trains = {}
 		self.completed_trains = {}
+		self.time = datetime.now()
 
 	def parse_table(self, soup):
 		tables = soup.find_all('table')
@@ -274,13 +275,15 @@ class TerminalScraper:
 		for train in trains:
 			if "S" not in train['train_id']:
 				if not train['train_id'] in self.current_trains:
-					new_trains.append(train)
+					if not train['train_id'] in self.completed_trains:
+						new_trains.append(train)
 		return new_trains
 
 	def create_new_trains(self, trains):
 		for train in trains:
-			train_obj = Train(train['train_id'], train['line'])
-			self.current_trains[train['train_id']] = train_obj
+			if not train['train_id'] in self.current_trains:
+				train_obj = Train(train['train_id'], train['line'])
+				self.current_trains[train['train_id']] = train_obj
 
 	def scrape_terminals(self, terminals):
 		all_trains = []
@@ -296,8 +299,11 @@ class TerminalScraper:
 	def run(self):
 		loop_count = 1
 		while True:
-			self.time = datetime.now()
+			now = datetime.now()
+			if now.day != self.time.day:
+				self.completed_trains = {}
 
+			self.time = now
 			#identify terminals to scrape
 			scrape_terms = []
 			for term, info in self.terminals.iteritems():
