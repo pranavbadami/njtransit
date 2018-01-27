@@ -147,16 +147,22 @@ class Train:
 						station, status = stop.split(u"\xa0\xa0")
 
 					if ("DEPARTED" in status) or ("Cancelled" in status):
+						print "start now"
 						return datetime.now()
 					else:
+						print"matching status", status
 						match = self.time_re.match(status)
 						if match is not None:
+							print "time", self.parse_time(match.group(1), match.group(2))
 							return self.parse_time(match.group(1), match.group(2))
 						else:
+							print "no match"
 							return datetime.now()
-			except ValueError:
+			except ValueError as v:
+				print "error", v
 				return datetime.now()
 		# no table, scrape every ten mins until table appears
+		print "no table"
 		return datetime.now() + timedelta(minutes=10)
 
 	def stop_scraping(self):
@@ -217,7 +223,7 @@ class Train:
 
 		file_name = 'test/{}_{}'.format(self.created_at.strftime("%Y_%m_%d"), 
 										self.id)
-		with open(file_name, 'w+') as outfile:
+		with open(file_name, 'a') as outfile:
 			json.dump(data_dict, outfile, default=str)
 
 
