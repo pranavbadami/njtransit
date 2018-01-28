@@ -53,6 +53,7 @@ TERMINALS = {
 
 TRAIN_COLUMN = 4
 LINE_COLUMN = 3
+DEP_COLUMN = 0
 RAIL_DATA = "./rail_data/"
 
 trip_stops = pd.DataFrame()
@@ -65,11 +66,12 @@ class Train:
 	url = "http://dv.njtransit.com/mobile/train_stops.aspx?train="
 	freq = 60
 	statuses = ["DEPARTED", "Cancelled"]
-	time_re = re.compile(".*(\d+):(\d+).*")
+	time_re = re.compile(".*?(\d+):(\d+).*")
 
-	def __init__(self, train_id, line):
+	def __init__(self, train_id, line, dep):
 		self.id = train_id
 		self.line = line
+		self.dep = dep
 		self.created_at = datetime.now()
 		self.scrape_count = 0
 		self.data = []
@@ -79,7 +81,7 @@ class Train:
 			self.buffer_mins = 2
 		else:
 			self.buffer_mins = 30
-
+		self.scheduled = True
 		self.t_scrape = self.get_t_scrape()
 		self.completed = False
 
@@ -111,59 +113,83 @@ class Train:
 	def get_scheduled_time(self):
 		try:
 			scheduled = trip_stops[trip_stops['block_id'] == self.id]['arrival_time'].iloc[0]
+			self.scheduled = True
 			scheduled = self.schedule_datetime(scheduled) - timedelta(minutes=self.buffer_mins)
 			if datetime.now() > scheduled:
 				scheduled = datetime.now()
+
 			return scheduled
 		except IndexError:
 			# train not in schedule
+			self.scheduled = False
 			return None
 
 	def parse_time(self, hour, minute):
 		hour, minute = int(hour), int(minute)
 		evening_hour = hour + 12
-
 		if hour >= self.created_at.hour:
 			#only possible in morning
 			return datetime(year=self.created_at.year, month=self.created_at.month,
 							day=self.created_at.day, hour=hour, minute=minute) - timedelta(minutes=self.buffer_mins)
 		else:
 			if evening_hour >= self.created_at.hour:
-				return datetime(year=self.created_at.year, month=self.created_at.month,
+				if evening_hour < 24:
+					return datetime(year=self.created_at.year, month=self.created_at.month,
 							day=self.created_at.day, hour=evening_hour, minute=minute) - timedelta(minutes=self.buffer_mins)
+				else:
+					evening_hour = evening_hour - 24
+					return datetime(year=self.created_at.year, month=self.created_at.month,
+							day=self.created_at.day) + timedelta(days=1, hours=evening_hour, minutes=minute) - timedelta(minutes=self.buffer_mins)
+
 			else:
 				return datetime(year=self.created_at.year, month=self.created_at.month,
 							day=self.created_at.day) + timedelta(days=1, hours=hour, minutes=minute) - timedelta(minutes=self.buffer_mins)
 
-	def approx_scheduled_time(self):
-		print "getting approx time", self.id
-		stops = self.request(retry=True)
-		for idx, stop in enumerate(stops):
-			try:
-				station, status = stop.split(u"\xa0\xa0")
-				if station in ALL_STATIONS:
-					if station == "Philadelphia":
-						stop = stops[idx + 1]
-						station, status = stop.split(u"\xa0\xa0")
+	# def approx_scheduled_time(self):
+	# 	print "getting approx time", self.id
+	# 	stops = self.request(retry=True)
+	# 	for idx, stop in enumerate(stops):
+	# 		try:
+	# 			station, status = stop.split(u"\xa0\xa0")
+	# 			if station in ALL_STATIONS:
+	# 				if station == "Philadelphia":
+	# 					stop = stops[idx + 1]
+	# 					station, status = stop.split(u"\xa0\xa0")
 
-					if ("DEPARTED" in status) or ("Cancelled" in status):
-						print "start now"
-						return datetime.now()
-					else:
-						print"matching status", status
-						match = self.time_re.match(status)
-						if match is not None:
-							print "time", self.parse_time(match.group(1), match.group(2))
-							return self.parse_time(match.group(1), match.group(2))
-						else:
-							print "no match"
-							return datetime.now()
-			except ValueError as v:
-				print "error", v
-				return datetime.now()
-		# no table, scrape every ten mins until table appears
-		print "no table"
-		return datetime.now() + timedelta(minutes=10)
+	# 				if ("DEPARTED" in status) or ("Cancelled" in status):
+	# 					print "start now"
+	# 					return datetime.now()
+	# 				else:
+	# 					print"matching status", status
+	# 					match = self.time_re.match(status)
+	# 					if match is not None:
+	# 						print "time", self.parse_time(match.group(1), match.group(2))
+	# 						return self.parse_time(match.group(1), match.group(2))
+	# 					else:
+	# 						print "no match"
+	# 						return datetime.now()
+	# 		except ValueError as v:
+	# 			print "error", v
+	# 			return datetime.now()
+	# 	# no table, scrape every ten mins until table appears
+	# 	print "no table"
+	# 	return datetime.now() + timedelta(minutes=10)
+
+	def approx_dep_time(self, dep):
+		dep = dep.replace("\r\n", "")
+		match = self.time_re.match(dep)
+
+		if match is not None:
+			return self.parse_time(match.group(1), match.group(2))
+		else:
+			return datetime.now()
+
+	def update_dep(self, dep):
+		if not self.scheduled:
+			approx_time = self.approx_dep_time(dep)
+			if approx_time < self.t_scrape:
+				self.t_scrape = approx_time
+				self.dep = dep
 
 	def stop_scraping(self):
 		latest_data = self.data[-1][1]
@@ -183,7 +209,7 @@ class Train:
 		if self.scrape_count == 0:
 			scheduled = self.get_scheduled_time()
 			if scheduled is None:
-				scheduled = self.approx_scheduled_time()
+				scheduled = self.approx_dep_time(self.dep)
 			return scheduled
 		else:
 			if self.stop_scraping():
@@ -251,7 +277,8 @@ class TerminalScraper:
 					row = table
 					cells = row.find_all('td')
 					trains.append({'train_id': cells[TRAIN_COLUMN].text, 
-								   'line': cells[LINE_COLUMN].text})
+								   'line': cells[LINE_COLUMN].text,
+								   'dep': cells[DEP_COLUMN].text})
 		return trains
 
 	#TODO: change scrape time here
@@ -288,8 +315,10 @@ class TerminalScraper:
 	def create_new_trains(self, trains):
 		for train in trains:
 			if not train['train_id'] in self.current_trains:
-				train_obj = Train(train['train_id'], train['line'])
+				train_obj = Train(train['train_id'], train['line'], train['dep'])
 				self.current_trains[train['train_id']] = train_obj
+			else:
+				self.current_trains[train['train_id']].update_dep(train['dep'])
 
 	def scrape_terminals(self, terminals):
 		all_trains = []
