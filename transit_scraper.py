@@ -130,7 +130,7 @@ class Train:
 		if hour >= self.created_at.hour:
 			#only possible in morning
 			return datetime(year=self.created_at.year, month=self.created_at.month,
-							day=self.created_at.day, hour=hour, minute=minute) - timedelta(minutes=self.buffer_mins)
+								day=self.created_at.day, hour=hour, minute=minute) - timedelta(minutes=self.buffer_mins)
 		else:
 			if evening_hour >= self.created_at.hour:
 				if evening_hour < 24:
