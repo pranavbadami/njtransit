@@ -1,5 +1,6 @@
 import json
 from rail_data import dv_station_names as dv
+import pandas as pd
 
 ALL_STATIONS = dv.ALL_STATIONS
 
@@ -59,14 +60,25 @@ class TrainParser:
 									   'status': None})
 		return departures
 
-	def format_as_csv(self, departures):
+	def format_as_rows(self, departures):
 		prev = departures[0]
+		rows = []
+		for idx, departure in enumerate(departures):
 
-		for departure in departures:
-			row = [self.train, self.line, self.type]
-			row = row + [prev['station'], departure['station'], departure['time'], departure['status']]
+			row = {"stop_num": idx + 1, 
+				   "train_id": self.train,
+				   "line": self.line,
+				   "type":self.type,
+				   "from": prev['station'],
+				   "to": departure['station'],
+				   "time": departure['time'],
+				   "status": departure['status']
+				   }
+			rows.append(row)
 			prev = departure
-			print row
+		return rows
+
+			
 
 
 
