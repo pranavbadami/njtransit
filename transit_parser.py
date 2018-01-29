@@ -30,7 +30,6 @@ class TrainParser:
 			for idx, stop in enumerate(stops):
 				try:
 					station, status = stop.split(u"\xa0\xa0")
-					print station, status
 				except ValueError:
 					station = ""
 					status = ""
@@ -38,7 +37,6 @@ class TrainParser:
 				if station not in ALL_STATIONS:
 					pass
 				elif ("DEPARTED" in status):
-					print "departed"
 					departures.append({'station': station,
 									   'time': time,
 									   'status': "Departed"})
