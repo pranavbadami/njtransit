@@ -59,7 +59,7 @@ class TrainParser:
 					dep_count = dep_count + 1
 
 		if len(departures) < len(self.data['data'][0][1]):
-			for stop in self.data['data'][0][1][len(departures)+1:]:
+			for stop in self.data['data'][0][1][len(departures):]:
 				try:
 					station, status = stop.split(u"\xa0\xa0")
 				except ValueError:
