@@ -6,7 +6,9 @@ import pandas as pd
 from rail_data import dv_station_names as dv
 import re
 import json
+import boto3
 
+s3 = boto3.resource('s3')
 ALL_STATIONS = dv.ALL_STATIONS
 TERMINALS = {
 	"New Bridge Landing":{"abbrev": "NH", "freq":3600},
@@ -227,7 +229,7 @@ class Train:
 			else:
 				print "response code {} for {} at {}".format(resp.status_code, self.id, datetime.now())
 				return None
-		except requests.exceptions.ReadTimeout:
+		except requests.exceptions.RequestException:
 			if retry:
 				print "retrying"
 				return self.request(timeout=timeout, retry=True)
@@ -245,12 +247,17 @@ class Train:
 	def write_to_file(self):
 		data_dict = {"id": self.id, "line": self.line, 
 					 "created_at": self.created_at, "type": self.type, 
-					 "scrape_count": self.scrape_count, "data": self.data}
+					 "scrape_count": self.scrape_count,
+					 "scheduled": self.scheduled, "data": self.data}
 
 		file_name = 'test/{}_{}'.format(self.created_at.strftime("%Y_%m_%d"), 
 										self.id)
 		with open(file_name, 'a') as outfile:
 			json.dump(data_dict, outfile, default=str)
+			outfile.close()
+
+		data = open(file_name, 'rb')
+		s3.Bucket('njtransit').put_object(Key=file_name, Body=data)
 
 
 class TerminalScraper:
@@ -293,6 +300,10 @@ class TerminalScraper:
 		except requests.exceptions.ReadTimeout:
 			print "request for", abbrev, "timed out"
 			return []
+		except requests.exceptions.RequestException:
+			print "request for", abbrev, "failed (non-timeout)"
+			return []
+
 
 
 	def get_train_type(self, train_id):

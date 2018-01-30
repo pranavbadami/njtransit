@@ -3,13 +3,27 @@ from rail_data import dv_station_names as dv
 import pandas as pd
 
 ALL_STATIONS = dv.ALL_STATIONS
+TIME_LEN = len("YYYY-MM-DD HH:MM:SS")
+DAY_LEN = len("YYYY-MM-DD ")
+
+RAIL_DATA = "./rail_data/"
+
+trip_stops = pd.DataFrame()
+trips = pd.read_csv(RAIL_DATA + 'trips.txt')
+stop_times = pd.read_csv(RAIL_DATA + 'stop_times.txt')
+trip_stops = stop_times.merge(trips, on=['trip_id'])
+trip_stops.rename(columns={'arrival_time': 'expected'}, inplace=True)
 
 class TrainParser:
 
 	def __init__(self, filename):
 		self.filename = filename
 		self.data = self.read(self.filename)
-		self.train, self.line, self.type = self.get_meta()
+		self.train = self.data['id']
+		self.line = self.data['line']
+		self.type = self.data['type']
+		self.scheduled = self.data['scheduled']
+		self.created_at = self.data['created_at']
 
 	def read(self, filename):
 		try:
@@ -17,9 +31,6 @@ class TrainParser:
 		except ValueError:
 			print "error reading {}".format(filename)
 			return None
-
-	def get_meta(self):
-		return self.data['id'], self.data['line'], self.data['type']
 
 	def get_stop_times(self):
 		dep_count = 0
@@ -60,25 +71,44 @@ class TrainParser:
 									   'status': None})
 		return departures
 
-	def format_as_rows(self, departures):
+	def get_rows(self, departures):
 		prev = departures[0]
 		rows = []
 		for idx, departure in enumerate(departures):
-
-			row = {"stop_num": idx + 1, 
+			row = {
+				   "stop_num": idx + 1, 
 				   "train_id": self.train,
 				   "line": self.line,
 				   "type":self.type,
+				   "scheduled": self.scheduled,
 				   "from": prev['station'],
 				   "to": departure['station'],
-				   "time": departure['time'],
+				   "time": departure['time'][:TIME_LEN],
 				   "status": departure['status']
 				   }
 			rows.append(row)
 			prev = departure
 		return rows
 
-			
+	def get_df(self, rows):
+		df = pd.DataFrame(rows)
+		df.set_index("stop_num", inplace=True)
+		return df
+	
+	def join_schedule(self, df):
+		if self.scheduled:
+			stops = trip_stops[trip_stops['block_id'] == self.train]
+			stops = stops[stops['trip_id'] == stops['trip_id'].unique()[0]]
+			stops = stops[['expected', 'stop_sequence']]
+			stops.set_index('stop_sequence', inplace=True)
+			stops['expected'] = self.created_at[:DAY_LEN] + stops['expected']
+			return df.join(stops)
+		else:
+			df['expected'] = None
+			df['stop_sequence'] = None
+			return df
+
+
 
 
 
