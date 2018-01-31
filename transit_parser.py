@@ -41,8 +41,8 @@ class TrainParser:
 		t_s = datetime.strptime(t_s, "%Y-%m-%d %H:%M:%S")
 
 		t_dep = datetime(year=t_s.year, month=t_s.month, day=t_s.day, hour=hour, minute=minute)
-		t_dep_eve = t_s + timedelta(hours=12)
-		t_dep_nxt = t_s + timedelta(days=1)
+		t_dep_eve = t_dep + timedelta(hours=12)
+		t_dep_nxt = t_dep + timedelta(days=1)
 
 		diff_dep = abs((t_s - t_dep).total_seconds())
 		diff_dep_eve = abs((t_s - t_dep_eve).total_seconds())
@@ -50,7 +50,7 @@ class TrainParser:
 
 		diffs = [diff_dep, diff_dep_eve, diff_dep_nxt]
 		min_diff = diffs.index(min(diffs))
-
+		print diffs
 		if min_diff == 0:
 			return t_dep.strftime("%Y-%m-%d %H:%M:%S")
 		elif min_diff == 1:
@@ -135,9 +135,12 @@ class TrainParser:
 		return df
 	
 	def join_schedule(self, df):
+		num_stops = len(df)
 		if self.scheduled:
 			stops = trip_stops[trip_stops['block_id'] == self.train]
-			stops = stops[stops['trip_id'] == stops['trip_id'].unique()[0]]
+			trip_ids = stops.groupby("trip_id").size()
+			valid_ids = trip_ids[trip_ids == num_stops]
+			stops = stops[stops['trip_id'] == valid_ids.index.unique()[0]]
 			stops = stops[['expected', 'stop_sequence']]
 			stops.set_index('stop_sequence', inplace=True)
 			stops['expected'] = self.created_at[:DAY_LEN] + stops['expected']
