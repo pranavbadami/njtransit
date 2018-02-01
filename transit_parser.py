@@ -92,8 +92,11 @@ class TrainParser:
 					station = ""
 					status = ""
 				if station in ALL_STATIONS:
+					match = self.time_re.match(status)
+					approx_time = self.parse_time(match.group(1), match.group(2), time)
+
 					departures.append({'station': station,
-									   'time': time,
+									   'time': approx_time,
 									   'status': None})
 		# time prediction of last station from penultimate frame
 		if self.type == "NJ Transit":
@@ -103,9 +106,9 @@ class TrainParser:
 			station, status = stop.split(u"\xa0\xa0")
 			if station in ALL_STATIONS:
 				match = self.time_re.match(status)
-				time = self.parse_time(match.group(1), match.group(2), scrape_time)
+				approx_time = self.parse_time(match.group(1), match.group(2), scrape_time)
 				departures[-1] = {'station': departures[-1]['station'],
-								  'time': time,
+								  'time': approx_time,
 								  'status': departures[-1]['status']}
 
 		return departures
