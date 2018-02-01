@@ -97,7 +97,7 @@ class TrainParser:
 									   'status': None})
 		# time prediction of last station from penultimate frame
 		if self.type == "NJ Transit":
-			penultimate = self.data['data'][-3]
+			penultimate = self.data['data'][-2]
 			scrape_time = penultimate[0]
 			stop = penultimate[1][-2]
 			station, status = stop.split(u"\xa0\xa0")

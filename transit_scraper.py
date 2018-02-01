@@ -321,6 +321,10 @@ class TerminalScraper:
 				if not train['train_id'] in self.current_trains:
 					if not train['train_id'] in self.completed_trains:
 						new_trains.append(train)
+				else:
+					# update dep time of current train
+					self.current_trains[train['train_id']].update_dep(train['dep'])
+
 		return new_trains
 
 	def create_new_trains(self, trains):
