@@ -7,3 +7,5 @@ test*/
 .DS_Store
 
 rail_data/*.pyc
+
+./rail_data/*.pyc
