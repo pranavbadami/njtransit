@@ -187,7 +187,7 @@ class Train:
 			return datetime.now()
 
 	def update_dep(self, dep):
-		if not self.scheduled:
+		if not self.scheduled and not self.scrape_count:
 			approx_time = self.approx_dep_time(dep)
 			if approx_time < self.t_scrape:
 				self.t_scrape = approx_time
@@ -250,14 +250,14 @@ class Train:
 					 "scrape_count": self.scrape_count,
 					 "scheduled": self.scheduled, "data": self.data}
 
-		file_name = 'test/{}_{}'.format(self.created_at.strftime("%Y_%m_%d"), 
-										self.id)
-		with open(file_name, 'a') as outfile:
+		date_str = self.created_at.strftime("%Y_%m_%d")
+		file_name = '{}_{}'.format(date_str, self.id)
+		with open('trains/' + file_name, 'a') as outfile:
 			json.dump(data_dict, outfile, default=str)
 			outfile.close()
 
-		data = open(file_name, 'rb')
-		s3.Bucket('njtransit').put_object(Key=file_name, Body=data)
+		data = open('trains/' + file_name, 'rb')
+		s3.Bucket('njtransit').put_object(Key='{}/{}'.format(date_str, file_name), Body=data)
 
 
 class TerminalScraper:
