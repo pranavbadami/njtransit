@@ -50,7 +50,6 @@ class TrainParser:
 
 		diffs = [diff_dep, diff_dep_eve, diff_dep_nxt]
 		min_diff = diffs.index(min(diffs))
-		print diffs
 		if min_diff == 0:
 			return t_dep.strftime("%Y-%m-%d %H:%M:%S")
 		elif min_diff == 1:
@@ -85,7 +84,7 @@ class TrainParser:
 					dep_count = dep_count + 1
 
 		if (len(departures) + 1) < len(self.data['data'][0][1]):
-			for stop in self.data['data'][0][1][len(departures):]:
+			for stop in self.data['data'][-2][1][len(departures):]:
 				try:
 					station, status = stop.split(u"\xa0\xa0")
 				except ValueError:
