@@ -1,6 +1,8 @@
 import json
 from rail_data import dv_station_names as dv
 import pandas as pd
+import re
+from datetime import datetime, timedelta
 
 ALL_STATIONS = dv.ALL_STATIONS
 TIME_LEN = len("YYYY-MM-DD HH:MM:SS")
@@ -15,6 +17,7 @@ trip_stops = stop_times.merge(trips, on=['trip_id'])
 trip_stops.rename(columns={'arrival_time': 'expected'}, inplace=True)
 
 class TrainParser:
+	time_re = re.compile(".*?(\d+):(\d+).*")
 
 	def __init__(self, filename):
 		self.filename = filename
@@ -31,6 +34,29 @@ class TrainParser:
 		except ValueError:
 			print "error reading {}".format(filename)
 			return None
+
+	def parse_time(self, hour, minute, t_s):
+		hour, minute = int(hour), int(minute)
+		t_s = t_s[:TIME_LEN]
+		t_s = datetime.strptime(t_s, "%Y-%m-%d %H:%M:%S")
+
+		t_dep = datetime(year=t_s.year, month=t_s.month, day=t_s.day, hour=hour, minute=minute)
+		t_dep_eve = t_dep + timedelta(hours=12)
+		t_dep_nxt = t_dep + timedelta(days=1)
+
+		diff_dep = abs((t_s - t_dep).total_seconds())
+		diff_dep_eve = abs((t_s - t_dep_eve).total_seconds())
+		diff_dep_nxt = abs((t_s - t_dep_nxt).total_seconds())
+
+		diffs = [diff_dep, diff_dep_eve, diff_dep_nxt]
+		min_diff = diffs.index(min(diffs))
+		print diffs
+		if min_diff == 0:
+			return t_dep.strftime("%Y-%m-%d %H:%M:%S")
+		elif min_diff == 1:
+			return t_dep_eve.strftime("%Y-%m-%d %H:%M:%S")
+		else:
+			return t_dep_nxt.strftime("%Y-%m-%d %H:%M:%S")
 
 	def get_stop_times(self):
 		dep_count = 0
@@ -58,7 +84,7 @@ class TrainParser:
 									   'status': "Cancelled"})
 					dep_count = dep_count + 1
 
-		if len(departures) < len(self.data['data'][0][1]):
+		if (len(departures) + 1) < len(self.data['data'][0][1]):
 			for stop in self.data['data'][0][1][len(departures):]:
 				try:
 					station, status = stop.split(u"\xa0\xa0")
@@ -66,9 +92,25 @@ class TrainParser:
 					station = ""
 					status = ""
 				if station in ALL_STATIONS:
+					match = self.time_re.match(status)
+					approx_time = self.parse_time(match.group(1), match.group(2), time)
+
 					departures.append({'station': station,
-									   'time': time,
+									   'time': approx_time,
 									   'status': None})
+		# time prediction of last station from penultimate frame
+		if self.type == "NJ Transit":
+			penultimate = self.data['data'][-2]
+			scrape_time = penultimate[0]
+			stop = penultimate[1][-2]
+			station, status = stop.split(u"\xa0\xa0")
+			if station in ALL_STATIONS:
+				match = self.time_re.match(status)
+				approx_time = self.parse_time(match.group(1), match.group(2), scrape_time)
+				departures[-1] = {'station': departures[-1]['station'],
+								  'time': approx_time,
+								  'status': departures[-1]['status']}
+
 		return departures
 
 	def get_rows(self, departures):
@@ -96,9 +138,12 @@ class TrainParser:
 		return df
 	
 	def join_schedule(self, df):
+		num_stops = len(df)
 		if self.scheduled:
 			stops = trip_stops[trip_stops['block_id'] == self.train]
-			stops = stops[stops['trip_id'] == stops['trip_id'].unique()[0]]
+			trip_ids = stops.groupby("trip_id").size()
+			valid_ids = trip_ids[trip_ids == num_stops]
+			stops = stops[stops['trip_id'] == valid_ids.index.unique()[0]]
 			stops = stops[['expected', 'stop_sequence']]
 			stops.set_index('stop_sequence', inplace=True)
 			stops['expected'] = self.created_at[:DAY_LEN] + stops['expected']
