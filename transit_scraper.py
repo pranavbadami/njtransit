@@ -187,7 +187,7 @@ class Train:
 			return datetime.now()
 
 	def update_dep(self, dep):
-		if not self.scheduled:
+		if not self.scheduled and not self.scrape_count:
 			approx_time = self.approx_dep_time(dep)
 			if approx_time < self.t_scrape:
 				self.t_scrape = approx_time
