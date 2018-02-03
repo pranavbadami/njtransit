@@ -3,6 +3,10 @@ from rail_data import dv_station_names as dv
 import pandas as pd
 import re
 from datetime import datetime, timedelta
+import boto3
+import os
+
+s3 = boto3.resource('s3')
 
 ALL_STATIONS = dv.ALL_STATIONS
 TIME_LEN = len("YYYY-MM-DD HH:MM:SS")
@@ -71,6 +75,7 @@ class TrainParser:
 					status = ""
 
 				if ("DEPARTED" in status):
+					print "DEPARTED", station, status
 					if station in ALL_STATIONS:
 						departures.append({'station': station,
 										   'time': time,
@@ -98,17 +103,20 @@ class TrainParser:
 									   'time': approx_time,
 									   'status': None})
 		# time prediction of last station from penultimate frame
-		if self.type == "NJ Transit":
-			penultimate = self.data['data'][-2]
-			scrape_time = penultimate[0]
-			stop = penultimate[1][-2]
-			station, status = stop.split(u"\xa0\xa0")
-			if station in ALL_STATIONS:
-				match = self.time_re.match(status)
-				approx_time = self.parse_time(match.group(1), match.group(2), scrape_time)
-				departures[-1] = {'station': departures[-1]['station'],
-								  'time': approx_time,
-								  'status': departures[-1]['status']}
+		try:
+			if self.type == "NJ Transit":
+				penultimate = self.data['data'][-2]
+				scrape_time = penultimate[0]
+				stop = penultimate[1][-2]
+				station, status = stop.split(u"\xa0\xa0")
+				if station in ALL_STATIONS:
+					match = self.time_re.match(status)
+					approx_time = self.parse_time(match.group(1), match.group(2), scrape_time)
+					departures[-1] = {'station': departures[-1]['station'],
+									  'time': approx_time,
+									  'status': departures[-1]['status']}
+		except IndexError:
+			pass
 
 		return departures
 
@@ -151,6 +159,24 @@ class TrainParser:
 			df['expected'] = None
 			df['stop_sequence'] = None
 			return df
+
+def download_train_files(year, month, day, path='./scraped_data/'):
+	year, month, day = str(year), str(month), str(day)
+	month = month.zfill(2)
+	day = day.zfill(2)
+	day_str = '{}_{}_{}/'.format(year, month, day)
+	directory = path + day_str
+	if not os.path.exists(directory):
+		os.makedirs(directory)
+	bucket = s3.Bucket('njtransit')
+
+	for obj in bucket.objects.filter(Prefix=day_str).limit(10):
+		with open(path + obj.key, 'a') as outfile:
+			s3_obj = obj.get()
+			data = s3_obj['Body'].read()
+			outfile.write(data)
+			outfile.close()
+	return obj
 
 
 

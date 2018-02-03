@@ -11,3 +11,6 @@ rail_data/*.pyc
 ./rail_data/*.pyc
 
 trains/
+
+scraped_data/
+
