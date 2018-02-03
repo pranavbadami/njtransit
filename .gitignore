@@ -9,3 +9,5 @@ test*/
 rail_data/*.pyc
 
 ./rail_data/*.pyc
+
+trains/
