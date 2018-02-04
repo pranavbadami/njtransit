@@ -5,13 +5,13 @@ import re
 from datetime import datetime, timedelta
 import boto3
 import os
+from os.path import isfile, join
 
 s3 = boto3.resource('s3')
 
 ALL_STATIONS = dv.ALL_STATIONS
 TIME_LEN = len("YYYY-MM-DD HH:MM:SS")
 DAY_LEN = len("YYYY-MM-DD ")
-
 RAIL_DATA = "./rail_data/"
 
 trip_stops = pd.DataFrame()
@@ -64,47 +64,51 @@ class TrainParser:
 	def get_stop_times(self):
 		dep_count = 0
 		departures = []
+		finished_stations = {}
 		for frame in self.data['data']:
 			time = frame[0]
-			stops = frame[1][dep_count:]
+			stops = frame[1]
 			for idx, stop in enumerate(stops):
 				try:
 					station, status = stop.split(u"\xa0\xa0")
 				except ValueError:
 					station = ""
 					status = ""
-
-				if ("DEPARTED" in status):
-					print "DEPARTED", station, status
+				if station in finished_stations:
+					pass
+				elif ("DEPARTED" in status):
 					if station in ALL_STATIONS:
 						departures.append({'station': station,
 										   'time': time,
 										   'status': "Departed"})
-					dep_count = dep_count + 1
+						finished_stations[station] = True
+
 				elif ("Cancelled" in status):
 					if station in ALL_STATIONS:
 						departures.append({'station': station,
 									   'time': time,
 									   'status': "Cancelled"})
-					dep_count = dep_count + 1
+						finished_stations[station] = True
 
-		if (len(departures) + 1) < len(self.data['data'][0][1]):
-			for stop in self.data['data'][-2][1][len(departures):]:
-				try:
-					station, status = stop.split(u"\xa0\xa0")
-				except ValueError:
-					station = ""
-					status = ""
-				if station in ALL_STATIONS:
-					match = self.time_re.match(status)
-					approx_time = self.parse_time(match.group(1), match.group(2), time)
+		if self.type == "NJ Transit":
+			if (len(departures) + 1) < len(self.data['data'][0][1]):
+				# print len(departures)
+				for stop in self.data['data'][-2][1][len(departures):]:
+					try:
+						station, status = stop.split(u"\xa0\xa0")
+					except ValueError:
+						station = ""
+						status = ""
+					if station in ALL_STATIONS:
+						# print "station", station, status
+						match = self.time_re.match(status)
+						approx_time = self.parse_time(match.group(1), match.group(2), time)
 
-					departures.append({'station': station,
-									   'time': approx_time,
-									   'status': None})
-		# time prediction of last station from penultimate frame
-		try:
-			if self.type == "NJ Transit":
+						departures.append({'station': station,
+										   'time': approx_time,
+										   'status': None})
+			# time prediction of last station from penultimate frame
+			try:
 				penultimate = self.data['data'][-2]
 				scrape_time = penultimate[0]
 				stop = penultimate[1][-2]
@@ -115,14 +119,18 @@ class TrainParser:
 					departures[-1] = {'station': departures[-1]['station'],
 									  'time': approx_time,
 									  'status': departures[-1]['status']}
-		except IndexError:
-			pass
+			except IndexError:
+				pass
+			except AttributeError:
+				pass
 
 		return departures
 
 	def get_rows(self, departures):
-		prev = departures[0]
+		if not len(departures):
+			return []
 		rows = []
+		prev = departures[0]
 		for idx, departure in enumerate(departures):
 			row = {
 				   "stop_num": idx + 1, 
@@ -140,27 +148,94 @@ class TrainParser:
 		return rows
 
 	def get_df(self, rows):
+		if not len(rows):
+			return None
 		df = pd.DataFrame(rows)
 		df.set_index("stop_num", inplace=True)
 		return df
+
+	def format_schedule_time(self, scheduled):
+		date, time = scheduled.split(" ")
+		hours, minutes, seconds = time.split(":")
+		hours, minutes, seconds = int(hours), int(minutes), int(seconds)
+		midnight = datetime.strptime(date, "%Y-%m-%d")
+		actual_time = midnight + timedelta(hours=hours, minutes=minutes)
+		return actual_time.strftime("%Y-%m-%d %H:%M:%S")
 	
 	def join_schedule(self, df):
+		if df is None:
+			return None
 		num_stops = len(df)
 		if self.scheduled:
 			stops = trip_stops[trip_stops['block_id'] == self.train]
 			trip_ids = stops.groupby("trip_id").size()
 			valid_ids = trip_ids[trip_ids == num_stops]
+			if not len(valid_ids):
+				print "scheduling error", self.filename
+				return None
 			stops = stops[stops['trip_id'] == valid_ids.index.unique()[0]]
 			stops = stops[['expected', 'stop_sequence']]
 			stops.set_index('stop_sequence', inplace=True)
 			stops['expected'] = self.created_at[:DAY_LEN] + stops['expected']
+			stops['expected'] = stops['expected'].apply(lambda x: self.format_schedule_time(x))
 			return df.join(stops)
 		else:
 			df['expected'] = None
 			df['stop_sequence'] = None
 			return df
 
-def download_train_files(year, month, day, path='./scraped_data/'):
+	def is_valid(self, df):
+		if df is None:
+			return False
+		num_stops = len(df)
+		return ((df['from'].nunique() + 1) == num_stops) & (df['to'].nunique() == num_stops)
+ 
+# parses all trains in a directory and outputs a CSV
+class DayParser:
+
+	def __init__(self, path, day, csv_path='./csv/'):
+		self.path = path + day + '/'
+		self.day = day
+		self.csv_path = csv_path
+		self.files = [f for f in os.listdir(self.path) if not f.startswith(".")]
+		self.invalid_trains = []
+
+	def parse_train(self, filename):
+		train_name = self.path + filename
+		t = TrainParser(train_name)
+		times = t.get_stop_times()
+		rows = t.get_rows(times)
+		df = t.get_df(rows)
+		performance = t.join_schedule(df)
+		if not t.is_valid(performance):
+			return None
+		else:
+			return performance
+
+	def parse_all_trains(self):
+		all_trains = None
+		count = 0
+		for train in self.files:
+			print train
+			train_df = self.parse_train(train)
+			if train_df is not None:
+				count = count + 1
+				if all_trains is None:
+					all_trains = train_df
+				else:
+					train_df.reset_index(inplace=True)
+					all_trains = all_trains.append(train_df, ignore_index=True)
+			else:
+				self.invalid_trains.append(train)
+		all_trains.to_csv('{}.csv'.format(self.day))
+		print "successfully parsed", count, "trains to", '{}.csv'.format(self.day)
+		print len(self.invalid_trains), "invalid trains"
+		print self.invalid_trains
+
+
+
+#prefix = rpi/
+def download_train_files(year, month, day, path='./scraped_data/', prefix=''):
 	year, month, day = str(year), str(month), str(day)
 	month = month.zfill(2)
 	day = day.zfill(2)
@@ -169,8 +244,7 @@ def download_train_files(year, month, day, path='./scraped_data/'):
 	if not os.path.exists(directory):
 		os.makedirs(directory)
 	bucket = s3.Bucket('njtransit')
-
-	for obj in bucket.objects.filter(Prefix=day_str).limit(10):
+	for obj in bucket.objects.filter(Prefix=prefix+day_str).limit(10):
 		with open(path + obj.key, 'a') as outfile:
 			s3_obj = obj.get()
 			data = s3_obj['Body'].read()
