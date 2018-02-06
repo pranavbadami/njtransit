@@ -93,20 +93,22 @@ class TrainParser:
 		if self.type == "NJ Transit":
 			if (len(departures) + 1) < len(self.data['data'][0][1]):
 				# print len(departures)
-				for stop in self.data['data'][-2][1][len(departures):]:
-					try:
-						station, status = stop.split(u"\xa0\xa0")
-					except ValueError:
-						station = ""
-						status = ""
-					if station in ALL_STATIONS:
-						# print "station", station, status
-						match = self.time_re.match(status)
-						approx_time = self.parse_time(match.group(1), match.group(2), time)
+				if len(self.data['data']) > 1:
+					for stop in self.data['data'][-2][1][len(departures):]:
+						try:
+							station, status = stop.split(u"\xa0\xa0")
+						except ValueError:
+							station = ""
+							status = ""
+						if station in ALL_STATIONS:
+							# print "station", station, status
+							match = self.time_re.match(status)
+							if match is not None:
+								approx_time = self.parse_time(match.group(1), match.group(2), time)
 
-						departures.append({'station': station,
-										   'time': approx_time,
-										   'status': None})
+								departures.append({'station': station,
+												   'time': approx_time,
+												   'status': None})
 			# time prediction of last station from penultimate frame
 			try:
 				penultimate = self.data['data'][-2]
@@ -227,7 +229,7 @@ class DayParser:
 					all_trains = all_trains.append(train_df, ignore_index=True)
 			else:
 				self.invalid_trains.append(train)
-		all_trains.to_csv('{}.csv'.format(self.day))
+		all_trains.to_csv(self.csv_path + '{}.csv'.format(self.day))
 		print "successfully parsed", count, "trains to", '{}.csv'.format(self.day)
 		print len(self.invalid_trains), "invalid trains"
 		print self.invalid_trains
@@ -244,7 +246,7 @@ def download_train_files(year, month, day, path='./scraped_data/', prefix=''):
 	if not os.path.exists(directory):
 		os.makedirs(directory)
 	bucket = s3.Bucket('njtransit')
-	for obj in bucket.objects.filter(Prefix=prefix+day_str).limit(10):
+	for obj in bucket.objects.filter(Prefix=prefix+day_str):
 		with open(path + obj.key, 'a') as outfile:
 			s3_obj = obj.get()
 			data = s3_obj['Body'].read()
