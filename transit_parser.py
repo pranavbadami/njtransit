@@ -1,5 +1,4 @@
 import json
-from rail_data import dv_station_names as dv
 import pandas as pd
 import re
 from datetime import datetime, timedelta
@@ -9,10 +8,11 @@ from os.path import isfile, join
 
 s3 = boto3.resource('s3')
 
-ALL_STATIONS = dv.ALL_STATIONS
+
 TIME_LEN = len("YYYY-MM-DD HH:MM:SS")
 DAY_LEN = len("YYYY-MM-DD ")
 RAIL_DATA = "./rail_data/"
+ALL_STATIONS = json.load(open(RAIL_DATA + 'rail_stations'))
 
 trip_stops = pd.DataFrame()
 trips = pd.read_csv(RAIL_DATA + 'trips.txt')
@@ -31,6 +31,7 @@ class TrainParser:
 		self.type = self.data['type']
 		self.scheduled = self.data['scheduled']
 		self.created_at = self.data['created_at']
+		self.created_dt = datetime.strptime(self.created_at, "%Y-%m-%d %H:%M:%S.%f")
 
 	def read(self, filename):
 		try:
@@ -44,7 +45,7 @@ class TrainParser:
 		t_s = t_s[:TIME_LEN]
 		t_s = datetime.strptime(t_s, "%Y-%m-%d %H:%M:%S")
 
-		t_dep = datetime(year=t_s.year, month=t_s.month, day=t_s.day, hour=hour, minute=minute)
+		t_dep = datetime(year=self.created_dt.year, month=self.created_dt.month, day=self.created_dt.day, hour=hour, minute=minute)
 		t_dep_eve = t_dep + timedelta(hours=12)
 		t_dep_nxt = t_dep + timedelta(days=1)
 
@@ -61,6 +62,13 @@ class TrainParser:
 		else:
 			return t_dep_nxt.strftime("%Y-%m-%d %H:%M:%S")
 
+	def parse_station(self, stop):
+		try:
+			station, status = stop.split(u"\xa0\xa0")
+		except ValueError:
+			station = ""
+			status = ""
+		return station, status
 	def get_stop_times(self):
 		dep_count = 0
 		departures = []
@@ -69,13 +77,11 @@ class TrainParser:
 			time = frame[0]
 			stops = frame[1]
 			for idx, stop in enumerate(stops):
-				try:
-					station, status = stop.split(u"\xa0\xa0")
-				except ValueError:
-					station = ""
-					status = ""
+				station, status = self.parse_station(stop)
+
 				if station in finished_stations:
 					pass
+
 				elif ("DEPARTED" in status):
 					if station in ALL_STATIONS:
 						departures.append({'station': station,
@@ -83,23 +89,22 @@ class TrainParser:
 										   'status': "Departed"})
 						finished_stations[station] = True
 
-				elif ("Cancelled" in status):
+				elif ("Cancelled" in status) or ("CANCELLED" in status):
 					if station in ALL_STATIONS:
 						departures.append({'station': station,
 									   'time': time,
 									   'status': "Cancelled"})
 						finished_stations[station] = True
+			if len(departures) == len(stops):
+				break
 
 		if self.type == "NJ Transit":
 			if (len(departures) + 1) < len(self.data['data'][0][1]):
+				error = False
 				# print len(departures)
 				if len(self.data['data']) > 1:
-					for stop in self.data['data'][-2][1][len(departures):]:
-						try:
-							station, status = stop.split(u"\xa0\xa0")
-						except ValueError:
-							station = ""
-							status = ""
+					for stop in self.data['data'][-3][1][len(departures):]:
+						station, status = self.parse_station(stop)
 						if station in ALL_STATIONS:
 							# print "station", station, status
 							match = self.time_re.match(status)
@@ -111,10 +116,10 @@ class TrainParser:
 												   'status': None})
 			# time prediction of last station from penultimate frame
 			try:
-				penultimate = self.data['data'][-2]
+				penultimate = self.data['data'][-3]
 				scrape_time = penultimate[0]
 				stop = penultimate[1][-2]
-				station, status = stop.split(u"\xa0\xa0")
+				station, status = self.parse_station(stop)
 				if station in ALL_STATIONS:
 					match = self.time_re.match(status)
 					approx_time = self.parse_time(match.group(1), match.group(2), scrape_time)
@@ -135,15 +140,17 @@ class TrainParser:
 		prev = departures[0]
 		for idx, departure in enumerate(departures):
 			row = {
-				   "stop_num": idx + 1, 
 				   "train_id": self.train,
 				   "line": self.line,
 				   "type":self.type,
 				   "scheduled": self.scheduled,
 				   "from": prev['station'],
+				   "from_id": ALL_STATIONS[prev['station']],
 				   "to": departure['station'],
+				   "to_id": ALL_STATIONS[departure['station']],
 				   "time": departure['time'][:TIME_LEN],
-				   "status": departure['status']
+				   "status": departure['status'],
+				   "date": self.created_at[:DAY_LEN-1]
 				   }
 			rows.append(row)
 			prev = departure
@@ -153,7 +160,7 @@ class TrainParser:
 		if not len(rows):
 			return None
 		df = pd.DataFrame(rows)
-		df.set_index("stop_num", inplace=True)
+		# df.set_index("stop_num", inplace=True)
 		return df
 
 	def format_schedule_time(self, scheduled):
@@ -169,18 +176,18 @@ class TrainParser:
 			return None
 		num_stops = len(df)
 		if self.scheduled:
-			stops = trip_stops[trip_stops['block_id'] == self.train]
-			trip_ids = stops.groupby("trip_id").size()
-			valid_ids = trip_ids[trip_ids == num_stops]
-			if not len(valid_ids):
-				print "scheduling error", self.filename
-				return None
-			stops = stops[stops['trip_id'] == valid_ids.index.unique()[0]]
-			stops = stops[['expected', 'stop_sequence']]
-			stops.set_index('stop_sequence', inplace=True)
+			stops = trip_stops[trip_stops['block_id'] == self.train].copy()
+			stops.drop_duplicates(subset='stop_id', inplace=True)
+			# trip_ids = stops.groupby("trip_id").size()
+			# valid_ids = trip_ids[trip_ids == num_stops]
+			# if not len(valid_ids):
+			# 	print "scheduling error", self.filename
+			# 	return None
+			# stops = stops[stops['trip_id'] == valid_ids.index.unique()[0]]
+			stops = stops[['expected', 'stop_sequence', 'stop_id']]
 			stops['expected'] = self.created_at[:DAY_LEN] + stops['expected']
 			stops['expected'] = stops['expected'].apply(lambda x: self.format_schedule_time(x))
-			return df.join(stops)
+			return df.merge(stops, left_on='to_id', right_on='stop_id', how='left')
 		else:
 			df['expected'] = None
 			df['stop_sequence'] = None
@@ -212,7 +219,7 @@ class DayParser:
 		if not t.is_valid(performance):
 			return None
 		else:
-			return performance
+			return performance[['train_id', 'date', 'stop_sequence', 'from', 'from_id', 'to', 'to_id', 'expected', 'time', 'status', 'line', 'type']]
 
 	def parse_all_trains(self):
 		all_trains = None
@@ -225,11 +232,10 @@ class DayParser:
 				if all_trains is None:
 					all_trains = train_df
 				else:
-					train_df.reset_index(inplace=True)
 					all_trains = all_trains.append(train_df, ignore_index=True)
 			else:
 				self.invalid_trains.append(train)
-		all_trains.to_csv(self.csv_path + '{}.csv'.format(self.day))
+		all_trains.to_csv(self.csv_path + '{}.csv'.format(self.day), index=False)
 		print "successfully parsed", count, "trains to", '{}.csv'.format(self.day)
 		print len(self.invalid_trains), "invalid trains"
 		print self.invalid_trains
@@ -244,10 +250,10 @@ def download_train_files(year, month, day, path='./scraped_data/', prefix=''):
 	day_str = '{}_{}_{}/'.format(year, month, day)
 	directory = path + day_str
 	if not os.path.exists(directory):
-		os.makedirs(directory)
+		os.makedirs(directory)	
 	bucket = s3.Bucket('njtransit')
 	for obj in bucket.objects.filter(Prefix=prefix+day_str):
-		with open(path + obj.key, 'a') as outfile:
+		with open(path + obj.key[len(prefix):], 'a') as outfile:
 			s3_obj = obj.get()
 			data = s3_obj['Body'].read()
 			outfile.write(data)
