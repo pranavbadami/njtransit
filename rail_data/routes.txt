@@ -15,4 +15,3 @@ route_id,agency_id,route_short_name,route_long_name,route_type,route_url,route_c
 14,"NJT","","Princeton Shuttle",2,"",
 15,"NJT","","Raritan Valley Line",2,"",
 16,"NJT","","Riverline Light Rail",0,"",
-17,"NJT","","Meadowlands Rail Line",2,"",
