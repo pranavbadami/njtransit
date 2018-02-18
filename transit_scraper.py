@@ -9,7 +9,7 @@ import json
 import boto3
 
 s3 = boto3.resource('s3')
-ALL_STATIONS = dv.ALL_STATIONS
+
 TERMINALS = {
 	"New Bridge Landing":{"abbrev": "NH", "freq":3600},
 	"Newark Broad St":{"abbrev": "ND", "freq":1800},
@@ -51,12 +51,11 @@ TERMINALS = {
 	"Port Jervis":{"abbrev": "PO", "freq":1800}
 }
 
-
-
 TRAIN_COLUMN = 4
 LINE_COLUMN = 3
 DEP_COLUMN = 0
 RAIL_DATA = "./rail_data/"
+ALL_STATIONS = json.load(open(RAIL_DATA + 'rail_stations'))
 
 trip_stops = pd.DataFrame()
 trips = pd.read_csv(RAIL_DATA + 'trips.txt')
@@ -146,36 +145,6 @@ class Train:
 			else:
 				return datetime(year=self.created_at.year, month=self.created_at.month,
 							day=self.created_at.day) + timedelta(days=1, hours=hour, minutes=minute) - timedelta(minutes=self.buffer_mins)
-
-	# def approx_scheduled_time(self):
-	# 	print "getting approx time", self.id
-	# 	stops = self.request(retry=True)
-	# 	for idx, stop in enumerate(stops):
-	# 		try:
-	# 			station, status = stop.split(u"\xa0\xa0")
-	# 			if station in ALL_STATIONS:
-	# 				if station == "Philadelphia":
-	# 					stop = stops[idx + 1]
-	# 					station, status = stop.split(u"\xa0\xa0")
-
-	# 				if ("DEPARTED" in status) or ("Cancelled" in status):
-	# 					print "start now"
-	# 					return datetime.now()
-	# 				else:
-	# 					print"matching status", status
-	# 					match = self.time_re.match(status)
-	# 					if match is not None:
-	# 						print "time", self.parse_time(match.group(1), match.group(2))
-	# 						return self.parse_time(match.group(1), match.group(2))
-	# 					else:
-	# 						print "no match"
-	# 						return datetime.now()
-	# 		except ValueError as v:
-	# 			print "error", v
-	# 			return datetime.now()
-	# 	# no table, scrape every ten mins until table appears
-	# 	print "no table"
-	# 	return datetime.now() + timedelta(minutes=10)
 
 	def approx_dep_time(self, dep):
 		dep = dep.replace("\r\n", "")

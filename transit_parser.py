@@ -8,7 +8,6 @@ from os.path import isfile, join
 
 s3 = boto3.resource('s3')
 
-
 TIME_LEN = len("YYYY-MM-DD HH:MM:SS")
 DAY_LEN = len("YYYY-MM-DD ")
 RAIL_DATA = "./rail_data/"
@@ -225,7 +224,6 @@ class DayParser:
 		all_trains = None
 		count = 0
 		for train in self.files:
-			print train
 			train_df = self.parse_train(train)
 			if train_df is not None:
 				count = count + 1
@@ -240,11 +238,9 @@ class DayParser:
 		print len(self.invalid_trains), "invalid trains"
 		print self.invalid_trains
 
-
-
 #prefix = rpi/
+#year, month, day are strings ('2018', '2' or '02')
 def download_train_files(year, month, day, path='./scraped_data/', prefix=''):
-	year, month, day = str(year), str(month), str(day)
 	month = month.zfill(2)
 	day = day.zfill(2)
 	day_str = '{}_{}_{}/'.format(year, month, day)
@@ -260,8 +256,12 @@ def download_train_files(year, month, day, path='./scraped_data/', prefix=''):
 			outfile.close()
 	return obj
 
-
-
-
-
+# days=['2018_02_11', 2018_02_12', ... ]
+def download_and_parse(days, path='./scraped_data/', prefix=''):
+	for day_str in days:
+		year, month, day = day_str.split('_')
+		download_train_files(year, month, day, path, prefix)
+		d = DayParser(path, day_str)
+		d.parse_all_trains()
+		print("completed {}".format(day_str))
 
