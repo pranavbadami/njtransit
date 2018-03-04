@@ -68,37 +68,52 @@ class TrainParser:
 			station = ""
 			status = ""
 		return station, status
+
+	def update_stop_times(self, status, time, departure):
+		dep_status = departure['status']
+		if dep_status == "Departed":
+			# update stop to cancelled due to feed irregularity
+			if ("Cancelled" in status) or ("CANCELLED" in status):
+				departure['status'] = "Cancelled"
+				departure['time'] = time
+		return departure
+
 	def get_stop_times(self):
 		dep_count = 0
 		departures = []
 		finished_stations = {}
+		len_stops = 0
 		for frame in self.data['data']:
 			time = frame[0]
 			stops = frame[1]
+			if len(stops) > len_stops:
+				len_stops = len(stops)
 			for idx, stop in enumerate(stops):
 				station, status = self.parse_station(stop)
 
 				if station in finished_stations:
-					pass
+					dep_idx = finished_stations[station]
+					departures[dep_idx] = self.update_stop_times(status, time, departures[dep_idx])
 
 				elif ("DEPARTED" in status):
 					if station in ALL_STATIONS:
 						departures.append({'station': station,
 										   'time': time,
 										   'status': "Departed"})
-						finished_stations[station] = True
+						finished_stations[station] = len(departures) - 1
 
 				elif ("Cancelled" in status) or ("CANCELLED" in status):
 					if station in ALL_STATIONS:
 						departures.append({'station': station,
 									   'time': time,
 									   'status': "Cancelled"})
-						finished_stations[station] = True
+						finished_stations[station] = len(departures) - 1
 			if len(departures) == len(stops):
 				break
 
 		if self.type == "NJ Transit":
-			if (len(departures) + 1) < len(self.data['data'][0][1]):
+			# fill in estimated predictions
+			if (len(departures) + 1) < len_stops:
 				error = False
 				# print len(departures)
 				if len(self.data['data']) > 1:
@@ -130,6 +145,16 @@ class TrainParser:
 			except AttributeError:
 				pass
 
+		# comb through departures and cancel as needed
+		cancelled = False
+		cancel_time = None
+		for departure in departures:
+			if not cancelled and (departure['status'] == 'Cancelled'):
+				cancelled = True
+				cancel_time = departure['time']
+			if cancelled:
+				departure['status'] = 'Cancelled'
+				departure['time'] = cancel_time
 		return departures
 
 	def get_rows(self, departures):
