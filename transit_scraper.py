@@ -7,6 +7,8 @@ from rail_data import dv_station_names as dv
 import re
 import json
 import boto3
+import os
+
 
 s3 = boto3.resource('s3')
 
@@ -226,7 +228,8 @@ class Train:
 			outfile.close()
 
 		data = open('trains/' + file_name, 'rb')
-		s3.Bucket('njtransit').put_object(Key='{}/{}'.format(date_str, file_name), Body=data)
+		s3.Bucket('njtransit/aws/').put_object(Key='{}/{}'.format(date_str, file_name), Body=data)
+		os.remove('trains/' + file_name)
 
 
 class TerminalScraper:
