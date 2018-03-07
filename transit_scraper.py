@@ -229,7 +229,10 @@ class Train:
 
 		data = open('trains/' + file_name, 'rb')
 		s3.Bucket('njtransit').put_object(Key='aws/{}/{}'.format(date_str, file_name), Body=data)
-		os.remove('trains/' + file_name)
+		try:
+			os.remove('trains/' + file_name)
+		except OSError:
+			print 'trains/{} does not exist'.format(file_name)
 
 
 class TerminalScraper:
