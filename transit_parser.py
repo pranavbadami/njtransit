@@ -37,7 +37,8 @@ class TrainParser:
 			return json.load(open(filename))
 		except ValueError:
 			print "error reading {}".format(filename)
-			return None
+			contents = open(filename).read().split('}{')
+			return json.loads(contents[0] + '}')
 
 	def parse_time(self, hour, minute, t_s):
 		hour, minute = int(hour), int(minute)
