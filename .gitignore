@@ -21,3 +21,5 @@ csv/
 plots/*
 
 *.png
+
+api_keys.txt
