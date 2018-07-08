@@ -23,3 +23,5 @@ plots/*
 *.png
 
 api_keys.txt
+
+notebooks/analysis/*.html
