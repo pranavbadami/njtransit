@@ -12,7 +12,7 @@ rail_data/*.pyc
 
 trains/
 
-scraped_data/
+scraped_trains/
 
 csv/
 
