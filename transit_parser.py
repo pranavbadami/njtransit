@@ -36,7 +36,6 @@ class TrainParser:
 		try:
 			return json.load(open(filename))
 		except ValueError:
-			print "error reading {}".format(filename)
 			contents = open(filename).read().split('}{')
 			return json.loads(contents[0] + '}')
 
@@ -203,12 +202,6 @@ class TrainParser:
 		if self.scheduled:
 			stops = trip_stops[trip_stops['block_id'] == self.train].copy()
 			stops.drop_duplicates(subset='stop_id', inplace=True)
-			# trip_ids = stops.groupby("trip_id").size()
-			# valid_ids = trip_ids[trip_ids == num_stops]
-			# if not len(valid_ids):
-			# 	print "scheduling error", self.filename
-			# 	return None
-			# stops = stops[stops['trip_id'] == valid_ids.index.unique()[0]]
 			stops = stops[['expected', 'stop_sequence', 'stop_id']]
 			stops['expected'] = self.created_at[:DAY_LEN] + stops['expected']
 			stops['expected'] = stops['expected'].apply(lambda x: self.format_schedule_time(x))
@@ -266,6 +259,7 @@ class DayParser:
 
 #prefix = rpi/
 #year, month, day are strings ('2018', '2' or '02')
+# TODO: add usage docstring here, refactor to take datetime
 def download_train_files(year, month, day, path='./scraped_data/', prefix=''):
 	month = month.zfill(2)
 	day = day.zfill(2)
@@ -280,9 +274,9 @@ def download_train_files(year, month, day, path='./scraped_data/', prefix=''):
 			data = s3_obj['Body'].read()
 			outfile.write(data)
 			outfile.close()
-	return obj
 
-# days=['2018_02_11', 2018_02_12', ... ]
+# TODO: add usage docstring here, refactor to take datetime
+# TODO: error handling for invalid day
 def download_and_parse(days, path='./scraped_data/', prefix=''):
 	for day_str in days:
 		year, month, day = day_str.split('_')
