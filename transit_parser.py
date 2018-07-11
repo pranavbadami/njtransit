@@ -12,6 +12,7 @@ TIME_LEN = len("YYYY-MM-DD HH:MM:SS")
 DAY_LEN = len("YYYY-MM-DD ")
 RAIL_DATA = "./rail_data/"
 ALL_STATIONS = json.load(open(RAIL_DATA + 'rail_stations'))
+BUCKET = "njtransit"
 
 trip_stops = pd.DataFrame()
 trips = pd.read_csv(RAIL_DATA + 'trips.txt')
@@ -44,7 +45,8 @@ class TrainParser:
 		t_s = t_s[:TIME_LEN]
 		t_s = datetime.strptime(t_s, "%Y-%m-%d %H:%M:%S")
 
-		t_dep = datetime(year=self.created_dt.year, month=self.created_dt.month, day=self.created_dt.day, hour=hour, minute=minute)
+		t_dep = datetime(year=self.created_dt.year, month=self.created_dt.month,
+						 day=self.created_dt.day, hour=hour, minute=minute)
 		t_dep_eve = t_dep + timedelta(hours=12)
 		t_dep_nxt = t_dep + timedelta(days=1)
 
@@ -257,31 +259,52 @@ class DayParser:
 		print len(self.invalid_trains), "invalid trains"
 		print self.invalid_trains
 
-#prefix = rpi/
-#year, month, day are strings ('2018', '2' or '02')
-# TODO: add usage docstring here, refactor to take datetime
-def download_train_files(year, month, day, path='./scraped_data/', prefix=''):
-	month = month.zfill(2)
-	day = day.zfill(2)
-	day_str = '{}_{}_{}/'.format(year, month, day)
-	directory = path + day_str
+# HELPER METHODS
+# Methods to download data and instantiate Parser objects
+
+def create_directory(dir_name, path='./scraped_data/'):
+	"""Create a directory at path + dir_name + "/". """
+
+	directory = path + dir_name + '/'
 	if not os.path.exists(directory):
-		os.makedirs(directory)	
-	bucket = s3.Bucket('njtransit')
-	for obj in bucket.objects.filter(Prefix=prefix+day_str):
-		with open(path + obj.key[len(prefix):], 'a') as outfile:
-			s3_obj = obj.get()
-			data = s3_obj['Body'].read()
-			outfile.write(data)
-			outfile.close()
+		os.makedirs(directory)
+	return directory
+
+def write_s3_obj_to_disk(s3_obj, directory):
+	"""Read s3_obj data, get filename, and write to path + filename.
+
+	Keyword arguments:
+	s3_obj -- object from s3 bucket
+	directory -- relative folder path to write file data
+	"""
+	filename = s3_obj.key.split("/")[-1]
+	data = s3_obj.get()['Body'].read()
+	outfile = open(directory + filename, 'a')
+	outfile.write(data)
+	outfile.close()
+
+# TODO: add usage docstring
+def download_train_files(date_string, path='./scraped_data/', prefix=''):
+	
+	"""Download files from bucket/prefix/date_string, write files to disk.
+
+	Keyword arguments:
+	date_string -- date prefix to group train files by day on S3 ('YYYY_MM_DD')
+	path -- relative folder path where scraped data is stored
+	prefix -- S3 prefix where train files are stored
+	"""
+	directory = create_directory(date_string, path)
+	bucket = s3.Bucket(BUCKET)
+	for obj in bucket.objects.filter(Prefix=prefix+date_string+'/'):
+		write_s3_obj_to_disk(obj, directory)
+
 
 # TODO: add usage docstring here, refactor to take datetime
 # TODO: error handling for invalid day
-def download_and_parse(days, path='./scraped_data/', prefix=''):
-	for day_str in days:
-		year, month, day = day_str.split('_')
-		download_train_files(year, month, day, path, prefix)
-		d = DayParser(path, day_str)
+def download_and_parse_days(days, path='./scraped_data/', prefix=''):
+	for date_string in days:
+		download_train_files(date_string, path, prefix)
+		d = DayParser(path, date_string)
 		d.parse_all_trains()
-		print("completed {}".format(day_str))
+		print("completed {}".format(date_string))
 
