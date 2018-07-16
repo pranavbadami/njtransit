@@ -186,8 +186,12 @@ class TrainParser:
 		if not len(rows):
 			return None
 		df = pd.DataFrame(rows)
-		# df.set_index("stop_num", inplace=True)
 		return df
+
+	def parse_file_to_df(self):
+		times = self.get_stop_times()
+		rows = self.get_rows(times)
+		return self.get_df(rows)
 
 	def format_schedule_time(self, scheduled):
 		date, time = scheduled.split(" ")
@@ -222,42 +226,59 @@ class TrainParser:
 # parses all trains in a directory and outputs a CSV
 class DayParser:
 
+	columns = ['train_id', 'date', 'stop_sequence', 'from', 'from_id', 'to',
+			   'to_id', 'expected', 'time', 'status', 'line', 'type']
+
 	def __init__(self, path, day, csv_path='./csv/'):
 		self.path = path + day + '/'
 		self.day = day
 		self.csv_path = csv_path
 		self.files = [f for f in os.listdir(self.path) if not f.startswith(".")]
-		self.invalid_trains = []
-
+		self.all_trains_df = pd.DataFrame(columns=self.columns)
+		self.invalid_train_ids = []
+	
 	def parse_train(self, filename):
-		train_name = self.path + filename
-		t = TrainParser(train_name)
-		times = t.get_stop_times()
-		rows = t.get_rows(times)
-		df = t.get_df(rows)
-		performance = t.join_schedule(df)
+		train_filename = self.path + filename
+		train = TrainParser(train_filename)
+		train_df = train.parse_file_to_df()
+		performance = train.join_schedule(train_df)
 		if not t.is_valid(performance):
 			return None
 		else:
-			return performance[['train_id', 'date', 'stop_sequence', 'from', 'from_id', 'to', 'to_id', 'expected', 'time', 'status', 'line', 'type']]
+			return performance[self.columns]
 
+	# TODO: still refactoring
 	def parse_all_trains(self):
-		all_trains = None
-		count = 0
+		all_trains = []
 		for train in self.files:
 			train_df = self.parse_train(train)
 			if train_df is not None:
-				count = count + 1
-				if all_trains is None:
-					all_trains = train_df
-				else:
-					all_trains = all_trains.append(train_df, ignore_index=True)
+				all_trains.append(train_df)
 			else:
-				self.invalid_trains.append(train)
-		all_trains.to_csv(self.csv_path + '{}.csv'.format(self.day), index=False)
-		print "successfully parsed", count, "trains to", '{}.csv'.format(self.day)
-		print len(self.invalid_trains), "invalid trains"
-		print self.invalid_trains
+				self.invalid_train_ids.append(train)
+		self.all_trains_df = pd.concat(all_trains, ignore_index=True)
+
+	def write_day_to_disk(self, print_results=True):
+		self.all_trains_df.to_csv('{}{}.csv'.format(self.csv_path, self.day),
+								  index=False)
+		if print_results:
+			self.print_results()
+
+	def get_parsed_counts(self):
+		count_valid = self.all_trains_df['train_id'].nunique()
+		count_invalid = len(self.invalid_train_ids)
+		return {
+			"valid": count_valid,
+			"invalid": count_invalid,
+			"total": count_valid + count_invalid
+		}
+		
+	# TODO: prints have been copy pasted, need to implement funcitonality
+	def print_results(self):
+		counts = self.get_parsed_counts()
+		print("successfully parsed", counts['total'], "trains for", self.day)
+		print(len(self.invalid_trains), "invalid trains for", self.day)
+		print(self.invalid_trains)
 
 # HELPER METHODS
 # Methods to download data and instantiate Parser objects
@@ -283,7 +304,7 @@ def write_s3_obj_to_disk(s3_obj, directory):
 	outfile.write(data)
 	outfile.close()
 
-# TODO: add usage docstring
+
 def download_train_files(date_string, path='./scraped_data/', prefix=''):
 	
 	"""Download files from bucket/prefix/date_string, write files to disk.
@@ -299,12 +320,18 @@ def download_train_files(date_string, path='./scraped_data/', prefix=''):
 		write_s3_obj_to_disk(obj, directory)
 
 
-# TODO: add usage docstring here, refactor to take datetime
-# TODO: error handling for invalid day
 def download_and_parse_days(days, path='./scraped_data/', prefix=''):
+	"""Download and parse train files for days.
+
+	Keyword arguments:
+	days -- list of date strings, e.g. ['2018-03-01', '2018-03-02', ...]
+	path -- relative folder path where scraped data is stored
+	prefix -- S3 prefix where train files are stored
+	"""
 	for date_string in days:
 		download_train_files(date_string, path, prefix)
 		d = DayParser(path, date_string)
 		d.parse_all_trains()
+		d.write_day_to_disk()
 		print("completed {}".format(date_string))
 
