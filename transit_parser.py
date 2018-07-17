@@ -223,10 +223,15 @@ class TrainParser:
 		num_stops = len(df)
 		return ((df['from'].nunique() + 1) == num_stops) & (df['to'].nunique() == num_stops)
  
-# parses all trains in a directory and outputs a CSV
 class DayParser:
+	"""Parses train files in a directory, which correspond to a day.
 
-	columns = ['train_id', 'date', 'stop_sequence', 'from', 'from_id', 'to',
+    For a given day, DayParser can parse all train files in the day's directory 
+    to a combined DataFrame containing stop-level data for all trains that day.
+    """
+
+    #TODO: change column names as needed
+	df_columns = ['train_id', 'date', 'stop_sequence', 'from', 'from_id', 'to',
 			   'to_id', 'expected', 'time', 'status', 'line', 'type']
 
 	def __init__(self, path, day, csv_path='./csv/'):
@@ -234,54 +239,76 @@ class DayParser:
 		self.day = day
 		self.csv_path = csv_path
 		self.files = [f for f in os.listdir(self.path) if not f.startswith(".")]
-		self.all_trains_df = pd.DataFrame(columns=self.columns)
-		self.invalid_train_ids = []
+		self.all_trains_df = pd.DataFrame(columns=self.df_columns)
+		self.invalid_trains = []
 	
 	def parse_train(self, filename):
+		"""
+		Parse data in a train file to a DataFrame where each row represents a
+		pair of stops along journey. 
+		
+		Creates a TrainParser instance from a train file, parses file data to
+		DataFrame, joins schedule data to dataframe, and returns DataFrame.
+		"""
 		train_filename = self.path + filename
 		train = TrainParser(train_filename)
 		train_df = train.parse_file_to_df()
 		performance = train.join_schedule(train_df)
-		if not t.is_valid(performance):
+		if not train.is_valid(performance):
 			return None
 		else:
-			return performance[self.columns]
+			return performance[self.df_columns]
 
-	# TODO: still refactoring
 	def parse_all_trains(self):
+		"""Parse all train files in directory to dataframe (self.all_trains_df).
+		If unable to parse train file, store train id (self.invalid_trains).
+		"""
 		all_trains = []
 		for train in self.files:
 			train_df = self.parse_train(train)
 			if train_df is not None:
 				all_trains.append(train_df)
 			else:
-				self.invalid_train_ids.append(train)
+				self.invalid_trains.append(train)
 		self.all_trains_df = pd.concat(all_trains, ignore_index=True)
 
 	def write_day_to_disk(self, print_results=True):
+		"""Write dataframe of vaid parsed trains to disk.
+
+		Keyword arguments:
+		print_results --- if True, parse counts are printed to stdout
+		"""
 		self.all_trains_df.to_csv('{}{}.csv'.format(self.csv_path, self.day),
 								  index=False)
 		if print_results:
 			self.print_results()
 
 	def get_parsed_counts(self):
+		"""Count valid, invalid and total trains for day. """
 		count_valid = self.all_trains_df['train_id'].nunique()
-		count_invalid = len(self.invalid_train_ids)
+		count_invalid = len(self.invalid_trains)
 		return {
 			"valid": count_valid,
 			"invalid": count_invalid,
 			"total": count_valid + count_invalid
 		}
-		
-	# TODO: prints have been copy pasted, need to implement funcitonality
+
 	def print_results(self):
+		"""Print out number of successfully and unsucessfully (invalid) parsed
+		trains for day.
+		"""
 		counts = self.get_parsed_counts()
-		print("successfully parsed", counts['total'], "trains for", self.day)
+		print("successfully parsed", counts['valid'], "trains for", self.day)
 		print(len(self.invalid_trains), "invalid trains for", self.day)
 		print(self.invalid_trains)
 
+
+################################################################################
 # HELPER METHODS
-# Methods to download data and instantiate Parser objects
+#
+# Functions to use in Python shell or script to download data and instantiate
+# Parser objects.
+################################################################################
 
 def create_directory(dir_name, path='./scraped_data/'):
 	"""Create a directory at path + dir_name + "/". """
