@@ -22,18 +22,22 @@ trip_stops.rename(columns={'arrival_time': 'expected'}, inplace=True)
 
 class TrainParser:
 	time_re = re.compile(".*?(\d+):(\d+).*")
+	departed_statuses = ["Departed", "DEPARTED", "departed"]
+	cancelled_statuses = ["Cancelled", "CANCELLED", "cancelled"]
 
 	def __init__(self, filename):
 		self.filename = filename
-		self.data = self.read(self.filename)
+		self.data = self.read_file(self.filename)
 		self.train = self.data['id']
 		self.line = self.data['line']
 		self.type = self.data['type']
 		self.scheduled = self.data['scheduled']
 		self.created_at = self.data['created_at']
 		self.created_dt = datetime.strptime(self.created_at, "%Y-%m-%d %H:%M:%S.%f")
+		self.departures = []
+		self.departed_stations = {}
 
-	def read(self, filename):
+	def read_file(self, filename):
 		try:
 			return json.load(open(filename))
 		except ValueError:
@@ -63,7 +67,7 @@ class TrainParser:
 		else:
 			return t_dep_nxt.strftime("%Y-%m-%d %H:%M:%S")
 
-	def parse_station(self, stop):
+	def parse_station_and_status(self, stop):
 		try:
 			station, status = stop.split(u"\xa0\xa0")
 		except ValueError:
@@ -71,25 +75,60 @@ class TrainParser:
 			status = ""
 		return station, status
 
-	def update_stop_times(self, status, time, departure):
-		dep_status = departure['status']
-		if dep_status == "Departed":
-			# update stop to cancelled due to feed irregularity
-			if ("Cancelled" in status) or ("CANCELLED" in status):
-				departure['status'] = "Cancelled"
-				departure['time'] = time
-		return departure
+	def update_departure(self, new_departure):
+		station = new_departure['station']
+		departure_idx = self.departed_stations[station]
+		prev_departure_status = self.departures[departure_idx]['status']
+		if prev_departure_status in self.departed_statuses:
+			if new_departure['status'] in self.cancelled_statuses:
+				self.departures[departure_idx].update(new_departure)
 
+	def append_departure(self, departed_stop):
+		station = departed_stop['station']
+		self.departures.append(departed_stop)
+		self.finished_stations[station] = len(self.departures) - 1
+
+	def append_or_update_departure(self, departed_stop):
+		station = departed_stop['station']
+		if station in self.departed_stations:
+			self.update_departure(dep_idx, departed_stop)
+
+		elif station in ALL_STATIONS:
+			self.append_departure()
+
+	def parse_status_line_if_departed(self, line):
+		station, status = self.parse_station_and_status(line)
+		if (status in self.departed_statuses) or (status in self.cancelled_statuses):
+			return {'station': station,
+					'status': status.lower()}
+		else:
+			return None
+		
+	def parse_departures_from_status_page(self, page):
+		time_scraped = page[0]
+		page_lines = page[1]
+
+		for idx, line in enumerate(page_lines):
+			departed_stop = self.parse_status_line_if_departed(line)
+			if departed_stop is not None:
+				departed_stop['time_scraped'] = time_scraped
+				self.append_or_update_departure(departed_stop)
+
+	#TODO: more descriptive name
 	def get_stop_times(self):
 		dep_count = 0
 		departures = []
 		finished_stations = {}
 		len_stops = 0
-		for frame in self.data['data']:
+		### currently being refactored
+		for page in self.data['data']:
+			parse_departures_from_status_page(page)
 			time = frame[0]
 			stops = frame[1]
+			# TODO: what is this for??
 			if len(stops) > len_stops:
 				len_stops = len(stops)
+			# END TODO
 			for idx, stop in enumerate(stops):
 				station, status = self.parse_station(stop)
 
@@ -110,8 +149,10 @@ class TrainParser:
 									   'time': time,
 									   'status': "Cancelled"})
 						finished_stations[station] = len(departures) - 1
+		### end currently being refactored
 			if len(departures) == len(stops):
 				break
+
 
 		if self.type == "NJ Transit":
 			# fill in estimated predictions
