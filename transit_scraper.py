@@ -315,7 +315,6 @@ class TerminalScraper:
 		for name in terminals:
 			terminal = self.terminals[name]
 			trains = self.get_departures(terminal['abbrev'])
-			# print terminal, trains
 			#TODO: get unique
 			self.terminals[name]['t_scrape'] = terminal['t_scrape'] + timedelta(seconds = terminal['freq'])
 			all_trains = all_trains + trains

@@ -1,4 +1,4 @@
-import json
+       import json
 import pandas as pd
 import re
 from datetime import datetime, timedelta
@@ -44,6 +44,15 @@ class TrainParser:
 			contents = open(filename).read().split('}{')
 			return json.loads(contents[0] + '}')
 
+	#TODO: REFACTORING IN PROGRESS
+	def approximate_time(self, status, time_scraped):
+		match = self.time_re.match(status)
+		if match is None:
+			return None
+		approx_time = self.parse_time(match.group(1), match.group(2), time_scraped)
+		return approx_time
+
+	#TODO: REFACTORING IN PROGRESS
 	def parse_time(self, hour, minute, t_s):
 		hour, minute = int(hour), int(minute)
 		t_s = t_s[:TIME_LEN]
@@ -91,10 +100,10 @@ class TrainParser:
 	def append_or_update_departure(self, departed_stop):
 		station = departed_stop['station']
 		if station in self.departed_stations:
-			self.update_departure(dep_idx, departed_stop)
+			self.update_departure(departed_stop)
 
 		elif station in ALL_STATIONS:
-			self.append_departure()
+			self.append_departure(departed_stop)
 
 	def parse_status_line_if_departed(self, line):
 		station, status = self.parse_station_and_status(line)
@@ -103,6 +112,11 @@ class TrainParser:
 					'status': status.lower()}
 		else:
 			return None
+
+	def parse_status_line_not_departed(self, line):
+		station, status = self.parse_station_and_status(line)
+		return {'station': station,
+				'status': None}
 		
 	def parse_departures_from_status_page(self, page):
 		time_scraped = page[0]
@@ -111,66 +125,49 @@ class TrainParser:
 		for idx, line in enumerate(page_lines):
 			departed_stop = self.parse_status_line_if_departed(line)
 			if departed_stop is not None:
-				departed_stop['time_scraped'] = time_scraped
+				departed_stop['time'] = time_scraped
 				self.append_or_update_departure(departed_stop)
+
+	#TODO: TEST REFACTORING
+	def fill_missing_departures_with_estimates(self):
+		if self.type == "NJ Transit":
+			num_status_lines = len(self.data['data'][-1]) - 1
+			num_departures = len(self.departures)
+			for i in range(num_status_lines, num_departures):
+				# TODO: FOR LOOP IS A LOWER LEVEL OF ABSTRACTION
+				time_scraped = self.data['data'][-3][0]
+				missing_line = self.data['data'][-3][1][i] #needs to be better
+				missing_stop = self.parse_status_line_not_departed(missing_line)
+				approx_time = self.approximate_time(missing_stop['status'],
+													time_scraped)
+				if approx_time is not None:
+					missing_stop['time'] = approx_time
+					self.append_or_update_departure(missing_stop)
 
 	#TODO: more descriptive name
 	def get_stop_times(self):
-		dep_count = 0
-		departures = []
-		finished_stations = {}
-		len_stops = 0
-		### currently being refactored
 		for page in self.data['data']:
-			parse_departures_from_status_page(page)
-			time = frame[0]
-			stops = frame[1]
-			# TODO: what is this for??
-			if len(stops) > len_stops:
-				len_stops = len(stops)
-			# END TODO
-			for idx, stop in enumerate(stops):
-				station, status = self.parse_station(stop)
+			self.parse_departures_from_status_page(page)
+		self.fill_missing_departures_with_estimates()	
 
-				if station in finished_stations:
-					dep_idx = finished_stations[station]
-					departures[dep_idx] = self.update_stop_times(status, time, departures[dep_idx])
-
-				elif ("DEPARTED" in status):
-					if station in ALL_STATIONS:
-						departures.append({'station': station,
-										   'time': time,
-										   'status': "Departed"})
-						finished_stations[station] = len(departures) - 1
-
-				elif ("Cancelled" in status) or ("CANCELLED" in status):
-					if station in ALL_STATIONS:
-						departures.append({'station': station,
-									   'time': time,
-									   'status': "Cancelled"})
-						finished_stations[station] = len(departures) - 1
-		### end currently being refactored
-			if len(departures) == len(stops):
-				break
-
-
+		
 		if self.type == "NJ Transit":
 			# fill in estimated predictions
-			if (len(departures) + 1) < len_stops:
-				error = False
-				# print len(departures)
-				if len(self.data['data']) > 1:
-					for stop in self.data['data'][-3][1][len(departures):]:
-						station, status = self.parse_station(stop)
-						if station in ALL_STATIONS:
-							# print "station", station, status
-							match = self.time_re.match(status)
-							if match is not None:
-								approx_time = self.parse_time(match.group(1), match.group(2), time)
+			# if (len(departures) + 1) < len_stops:
+			# 	# print len(departures)
+			# 	if len(self.data['data']) > 1:
+			# 		for stop in self.data['data'][-3][1][len(departures):]:
+			# 			station, status = self.parse_station(stop)
+			# 			if station in ALL_STATIONS:
+			# 				# print "station", station, status
+			# 				match = self.time_re.match(status)
+			# 				if match is not None:
+			# 					approx_time = self.parse_time(match.group(1), match.group(2), time)
 
-								departures.append({'station': station,
-												   'time': approx_time,
-												   'status': None})
+			# 					departures.append({'station': station,
+			# 									   'time': approx_time,
+			# 									   'status': None})
+			#TODO: REFACTOR NEXT
 			# time prediction of last station from penultimate frame
 			try:
 				penultimate = self.data['data'][-3]
@@ -187,6 +184,7 @@ class TrainParser:
 				pass
 			except AttributeError:
 				pass
+			#END TODO: REFACTOR NEXT
 
 		# comb through departures and cancel as needed
 		cancelled = False
