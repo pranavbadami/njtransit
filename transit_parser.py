@@ -1,4 +1,4 @@
-       import json
+import json
 import pandas as pd
 import re
 from datetime import datetime, timedelta
@@ -44,37 +44,36 @@ class TrainParser:
 			contents = open(filename).read().split('}{')
 			return json.loads(contents[0] + '}')
 
-	#TODO: REFACTORING IN PROGRESS
-	def approximate_time(self, status, time_scraped):
+	def get_possible_departure_times(self, time_scraped, status):
+		#TODO: refactor matching part
 		match = self.time_re.match(status)
 		if match is None:
 			return None
-		approx_time = self.parse_time(match.group(1), match.group(2), time_scraped)
-		return approx_time
+		#END TODO: refactor matching part
+		hour, minute = int(match.group(1)), int(match.group(2))
+		# DEBUG (if necessary): original used created_dt
+		dep_am = datetime(year=time_scraped.year, month=time_scraped.month,
+						  day=time_scraped.day, hour=hour, minute=minute)
+		return {
+			"am": dep_am,
+			"pm": dep_am + timedelta(hours=12),
+			"next_day": dep_am + timedelta(days=1)
+		}
+
+	def get_most_likely_departure_time(self, departure_times, time_scraped):
+		departure_times_keys = [key for key in departure_times.keys()]
+		differences = [abs((time_scraped - departure_times[key]).total_seconds()) for key in departure_times_keys]
+		min_idx = differences.index(min(differences))
+		return departure_times[departure_times_keys[min_idx]].strftime("%Y-%m-%d %H:%M:%S")
 
 	#TODO: REFACTORING IN PROGRESS
-	def parse_time(self, hour, minute, t_s):
-		hour, minute = int(hour), int(minute)
-		t_s = t_s[:TIME_LEN]
-		t_s = datetime.strptime(t_s, "%Y-%m-%d %H:%M:%S")
-
-		t_dep = datetime(year=self.created_dt.year, month=self.created_dt.month,
-						 day=self.created_dt.day, hour=hour, minute=minute)
-		t_dep_eve = t_dep + timedelta(hours=12)
-		t_dep_nxt = t_dep + timedelta(days=1)
-
-		diff_dep = abs((t_s - t_dep).total_seconds())
-		diff_dep_eve = abs((t_s - t_dep_eve).total_seconds())
-		diff_dep_nxt = abs((t_s - t_dep_nxt).total_seconds())
-
-		diffs = [diff_dep, diff_dep_eve, diff_dep_nxt]
-		min_diff = diffs.index(min(diffs))
-		if min_diff == 0:
-			return t_dep.strftime("%Y-%m-%d %H:%M:%S")
-		elif min_diff == 1:
-			return t_dep_eve.strftime("%Y-%m-%d %H:%M:%S")
-		else:
-			return t_dep_nxt.strftime("%Y-%m-%d %H:%M:%S")
+	def approximate_time(self, status, time_scraped):		
+		time_scraped = datetime.strptime(time_scraped[:TIME_LEN], "%Y-%m-%d %H:%M:%S")
+		possible_departure_times = self.get_possible_departure_times(time_scraped, status)
+		#TODO: estimate closest departure time
+		approx_time = self.get_most_likely_departure_time(possible_departure_times,
+														  time_scraped)
+		return approx_time
 
 	def parse_station_and_status(self, stop):
 		try:
@@ -95,7 +94,7 @@ class TrainParser:
 	def append_departure(self, departed_stop):
 		station = departed_stop['station']
 		self.departures.append(departed_stop)
-		self.finished_stations[station] = len(self.departures) - 1
+		self.departed_stations[station] = len(self.departures) - 1
 
 	def append_or_update_departure(self, departed_stop):
 		station = departed_stop['station']
@@ -107,7 +106,7 @@ class TrainParser:
 
 	def parse_status_line_if_departed(self, line):
 		station, status = self.parse_station_and_status(line)
-		if (status in self.departed_statuses) or (status in self.cancelled_statuses):
+		if (status in (self.departed_statuses + self.cancelled_statuses)):
 			return {'station': station,
 					'status': status.lower()}
 		else:
@@ -116,7 +115,7 @@ class TrainParser:
 	def parse_status_line_not_departed(self, line):
 		station, status = self.parse_station_and_status(line)
 		return {'station': station,
-				'status': None}
+				'status': status}
 		
 	def parse_departures_from_status_page(self, page):
 		time_scraped = page[0]
@@ -128,75 +127,47 @@ class TrainParser:
 				departed_stop['time'] = time_scraped
 				self.append_or_update_departure(departed_stop)
 
-	#TODO: TEST REFACTORING
+	def estimate_and_append_departure(self, line_idx):
+		time_scraped = self.data['data'][-3][0]
+		missing_line = self.data['data'][-3][1][line_idx]
+		missing_stop = self.parse_status_line_not_departed(missing_line)
+		
+		approx_time = self.approximate_time(missing_stop['status'], time_scraped)
+		if approx_time is not None:
+			missing_stop['time'] = approx_time
+			self.append_or_update_departure(missing_stop)
+
 	def fill_missing_departures_with_estimates(self):
-		if self.type == "NJ Transit":
-			num_status_lines = len(self.data['data'][-1]) - 1
-			num_departures = len(self.departures)
-			for i in range(num_status_lines, num_departures):
-				# TODO: FOR LOOP IS A LOWER LEVEL OF ABSTRACTION
-				time_scraped = self.data['data'][-3][0]
-				missing_line = self.data['data'][-3][1][i] #needs to be better
-				missing_stop = self.parse_status_line_not_departed(missing_line)
-				approx_time = self.approximate_time(missing_stop['status'],
-													time_scraped)
-				if approx_time is not None:
-					missing_stop['time'] = approx_time
-					self.append_or_update_departure(missing_stop)
+		num_status_lines = len(self.data['data'][-1][1]) - 1
+		num_departures = len(self.departures)
+		for i in range(num_departures, num_status_lines):
+			self.estimate_and_append_departure(i)
+
+	def estimate_last_departure(self):
+		num_status_lines = len(self.data['data'][-1][1]) - 1
+		self.estimate_and_append_departure(num_status_lines-1)
 
 	#TODO: more descriptive name
 	def get_stop_times(self):
 		for page in self.data['data']:
 			self.parse_departures_from_status_page(page)
-		self.fill_missing_departures_with_estimates()	
-
-		
 		if self.type == "NJ Transit":
-			# fill in estimated predictions
-			# if (len(departures) + 1) < len_stops:
-			# 	# print len(departures)
-			# 	if len(self.data['data']) > 1:
-			# 		for stop in self.data['data'][-3][1][len(departures):]:
-			# 			station, status = self.parse_station(stop)
-			# 			if station in ALL_STATIONS:
-			# 				# print "station", station, status
-			# 				match = self.time_re.match(status)
-			# 				if match is not None:
-			# 					approx_time = self.parse_time(match.group(1), match.group(2), time)
+			self.fill_missing_departures_with_estimates()
+			self.estimate_last_departure()
 
-			# 					departures.append({'station': station,
-			# 									   'time': approx_time,
-			# 									   'status': None})
-			#TODO: REFACTOR NEXT
-			# time prediction of last station from penultimate frame
-			try:
-				penultimate = self.data['data'][-3]
-				scrape_time = penultimate[0]
-				stop = penultimate[1][-2]
-				station, status = self.parse_station(stop)
-				if station in ALL_STATIONS:
-					match = self.time_re.match(status)
-					approx_time = self.parse_time(match.group(1), match.group(2), scrape_time)
-					departures[-1] = {'station': departures[-1]['station'],
-									  'time': approx_time,
-									  'status': departures[-1]['status']}
-			except IndexError:
-				pass
-			except AttributeError:
-				pass
-			#END TODO: REFACTOR NEXT
-
+		# TODO: REFACTOR INTO METHOD
 		# comb through departures and cancel as needed
 		cancelled = False
 		cancel_time = None
-		for departure in departures:
+		for departure in self.departures:
 			if not cancelled and (departure['status'] == 'Cancelled'):
 				cancelled = True
 				cancel_time = departure['time']
 			if cancelled:
 				departure['status'] = 'Cancelled'
 				departure['time'] = cancel_time
-		return departures
+		return self.departures
+		# END TODO: REFACTOR INTO METHOD
 
 	def get_rows(self, departures):
 		if not len(departures):
