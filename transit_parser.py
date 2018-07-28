@@ -14,11 +14,10 @@ RAIL_DATA = "./rail_data/"
 ALL_STATIONS = json.load(open(RAIL_DATA + 'rail_stations'))
 BUCKET = "njtransit"
 
-trip_stops = pd.DataFrame()
-trips = pd.read_csv(RAIL_DATA + 'trips.txt')
-stop_times = pd.read_csv(RAIL_DATA + 'stop_times.txt')
-trip_stops = stop_times.merge(trips, on=['trip_id'])
-trip_stops.rename(columns={'arrival_time': 'expected'}, inplace=True)
+TRIPS = pd.read_csv(RAIL_DATA + 'trips.txt')
+STOP_TIMES = pd.read_csv(RAIL_DATA + 'stop_times.txt')
+TRIP_STOPS = STOP_TIMES.merge(trips, on=['trip_id'])
+TRIP_STOPS.rename(columns={'arrival_time': 'expected'}, inplace=True)
 
 class TrainParser:
 	time_re = re.compile(".*?(\d+):(\d+).*")
@@ -83,13 +82,17 @@ class TrainParser:
 			status = ""
 		return station, status
 
+	def replace_departure(self, departed_stop):
+		station = departed_stop['station']
+		departure_idx = self.departed_stations[station]
+		self.departures[departure_idx] = departed_stop
+
 	def update_departure(self, new_departure):
 		station = new_departure['station']
 		departure_idx = self.departed_stations[station]
 		prev_departure_status = self.departures[departure_idx]['status']
-		if prev_departure_status in self.departed_statuses:
-			if new_departure['status'] in self.cancelled_statuses:
-				self.departures[departure_idx].update(new_departure)
+		if prev_departure_status != new_departure['status']:
+			self.departures[departure_idx].update(new_departure)
 
 	def append_departure(self, departed_stop):
 		station = departed_stop['station']
@@ -106,11 +109,14 @@ class TrainParser:
 
 	def parse_status_line_if_departed(self, line):
 		station, status = self.parse_station_and_status(line)
-		if (status in (self.departed_statuses + self.cancelled_statuses)):
-			return {'station': station,
-					'status': status.lower()}
+		if any(x in status for x in self.departed_statuses):
+			status = "departed"
+		elif any(x in status for x in self.cancelled_statuses):
+			status = "cancelled"
 		else:
 			return None
+		return {'station': station,
+				'status': status}
 
 	def parse_status_line_not_departed(self, line):
 		station, status = self.parse_station_and_status(line)
@@ -127,25 +133,47 @@ class TrainParser:
 				departed_stop['time'] = time_scraped
 				self.append_or_update_departure(departed_stop)
 
-	def estimate_and_append_departure(self, line_idx):
+	def estimate_departure(self, line_idx):
 		time_scraped = self.data['data'][-3][0]
 		missing_line = self.data['data'][-3][1][line_idx]
-		missing_stop = self.parse_status_line_not_departed(missing_line)
-		
-		approx_time = self.approximate_time(missing_stop['status'], time_scraped)
+		estimated_stop = self.parse_status_line_not_departed(missing_line)
+		approx_time = self.approximate_time(estimated_stop['status'], time_scraped)
 		if approx_time is not None:
-			missing_stop['time'] = approx_time
-			self.append_or_update_departure(missing_stop)
+			estimated_stop['time'] = approx_time
+			estimated_stop['status'] = 'departed'
+			return estimated_stop
+		return None
 
 	def fill_missing_departures_with_estimates(self):
 		num_status_lines = len(self.data['data'][-1][1]) - 1
 		num_departures = len(self.departures)
 		for i in range(num_departures, num_status_lines):
-			self.estimate_and_append_departure(i)
+			estimated_departure = self.estimate_departure(i)
+			if estimated_departure is not None:
+				self.append_or_update_departure(estimated_departure)
 
 	def estimate_last_departure(self):
 		num_status_lines = len(self.data['data'][-1][1]) - 1
-		self.estimate_and_append_departure(num_status_lines-1)
+		estimated_departure = self.estimate_departure(num_status_lines-1)
+		if estimated_departure is not None:
+			if estimated_departure['station'] in self.departed_stations:
+				self.replace_departure(estimated_departure)
+			else:
+				self.append_departure(estimated_departure)
+
+	def update_departures_if_cancelled(self):
+		train_cancelled = False
+		cancel_time = None
+		for departure in self.departures:
+			if not train_cancelled and (departure['status'] == 'cancelled'):
+				train_cancelled = True
+				cancel_time = departure['time']
+			elif train_cancelled:
+				#TODO: do this idiomatically
+				departure['status'] = 'cancelled'
+				departure['time'] = cancel_time
+				self.update_departure(departure)
+
 
 	#TODO: more descriptive name
 	def get_stop_times(self):
@@ -154,27 +182,14 @@ class TrainParser:
 		if self.type == "NJ Transit":
 			self.fill_missing_departures_with_estimates()
 			self.estimate_last_departure()
+		self.update_departures_if_cancelled()
 
-		# TODO: REFACTOR INTO METHOD
-		# comb through departures and cancel as needed
-		cancelled = False
-		cancel_time = None
-		for departure in self.departures:
-			if not cancelled and (departure['status'] == 'Cancelled'):
-				cancelled = True
-				cancel_time = departure['time']
-			if cancelled:
-				departure['status'] = 'Cancelled'
-				departure['time'] = cancel_time
-		return self.departures
-		# END TODO: REFACTOR INTO METHOD
-
-	def get_rows(self, departures):
-		if not len(departures):
+	def get_rows(self):
+		if not len(self.departures):
 			return []
 		rows = []
-		prev = departures[0]
-		for idx, departure in enumerate(departures):
+		prev = self.departures[0]
+		for idx, departure in enumerate(self.departures):
 			row = {
 				   "train_id": self.train,
 				   "line": self.line,
@@ -216,7 +231,7 @@ class TrainParser:
 			return None
 		num_stops = len(df)
 		if self.scheduled:
-			stops = trip_stops[trip_stops['block_id'] == self.train].copy()
+			stops = TRIP_STOPS[TRIP_STOPS['block_id'] == self.train].copy()
 			stops.drop_duplicates(subset='stop_id', inplace=True)
 			stops = stops[['expected', 'stop_sequence', 'stop_id']]
 			stops['expected'] = self.created_at[:DAY_LEN] + stops['expected']

@@ -320,6 +320,7 @@ class TerminalScraper:
 			all_trains = all_trains + trains
 		return all_trains
 
+	#TODO: refactor
 	def run(self):
 		loop_count = 1
 		while True:
