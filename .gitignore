@@ -16,6 +16,8 @@ scraped_trains/
 
 csv/
 
+old_csv/
+
 *.csv
 
 plots/*
@@ -25,3 +27,5 @@ plots/*
 api_keys.txt
 
 notebooks/analysis/*.html
+
+env/

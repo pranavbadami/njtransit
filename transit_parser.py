@@ -16,7 +16,7 @@ BUCKET = "njtransit"
 
 TRIPS = pd.read_csv(RAIL_DATA + 'trips.txt')
 STOP_TIMES = pd.read_csv(RAIL_DATA + 'stop_times.txt')
-TRIP_STOPS = STOP_TIMES.merge(trips, on=['trip_id'])
+TRIP_STOPS = STOP_TIMES.merge(TRIPS, on=['trip_id'])
 TRIP_STOPS.rename(columns={'arrival_time': 'expected'}, inplace=True)
 
 class TrainParser:
@@ -214,8 +214,9 @@ class TrainParser:
 		return df
 
 	def parse_file_to_df(self):
-		times = self.get_stop_times()
-		rows = self.get_rows(times)
+		print("parsing", self.filename) #REMOVE
+		self.get_stop_times()
+		rows = self.get_rows()
 		return self.get_df(rows)
 
 	def format_schedule_time(self, scheduled):
@@ -371,6 +372,18 @@ def download_train_files(date_string, path='./scraped_data/', prefix=''):
 	for obj in bucket.objects.filter(Prefix=prefix+date_string+'/'):
 		write_s3_obj_to_disk(obj, directory)
 
+def parse_days(days, path='scraped_trains/'):
+	"""Parse all train files for one day into CSV for a day. Write CSV to disk.
+
+	Keyword arguments:
+	days -- list of date strings, e.g. ['2018-03-01', '2018-03-02', ...]
+	path -- relative folder path where scraped data is stored
+	"""
+	for date_string in days:
+		d = DayParser(path, date_string)
+		d.parse_all_trains()
+		d.write_day_to_disk()
+		print("completed parsing {}".format(date_string))
 
 def download_and_parse_days(days, path='./scraped_data/', prefix=''):
 	"""Download and parse train files for days.
@@ -380,10 +393,12 @@ def download_and_parse_days(days, path='./scraped_data/', prefix=''):
 	path -- relative folder path where scraped data is stored
 	prefix -- S3 prefix where train files are stored
 	"""
+
 	for date_string in days:
 		download_train_files(date_string, path, prefix)
 		d = DayParser(path, date_string)
 		d.parse_all_trains()
 		d.write_day_to_disk()
 		print("completed {}".format(date_string))
+
 

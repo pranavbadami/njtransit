@@ -198,11 +198,11 @@ class Train:
 				status = self.parse_table(soup)
 				return status
 			else:
-				print "response code {} for {} at {}".format(resp.status_code, self.id, datetime.now())
+				print("response code {} for {} at {}".format(resp.status_code, self.id, datetime.now()))
 				return None
 		except requests.exceptions.RequestException:
 			if retry:
-				print "retrying"
+				print("retrying")
 				return self.request(timeout=timeout, retry=True)
 			else:
 				return None
@@ -232,7 +232,7 @@ class Train:
 		try:
 			os.remove('trains/' + file_name)
 		except OSError:
-			print 'trains/{} does not exist'.format(file_name)
+			print('trains/{} does not exist'.format(file_name))
 
 
 class TerminalScraper:
@@ -273,10 +273,10 @@ class TerminalScraper:
 			else:
 				return []
 		except requests.exceptions.ReadTimeout:
-			print "request for", abbrev, "timed out"
+			print("request for {} timed out".format(abbrev))
 			return []
 		except requests.exceptions.RequestException:
-			print "request for", abbrev, "failed (non-timeout)"
+			print("request for {} failed (non-timeout)".format(abbrev))
 			return []
 
 
@@ -342,7 +342,7 @@ class TerminalScraper:
 			completed = []
 			for train_id, train in self.current_trains.iteritems():
 				if train.completed:
-					print "completed", train_id
+					print("completed {}".format(train_id))
 					self.completed_trains[train_id] = train
 					completed.append(train_id)
 					train.write_to_file()
@@ -354,7 +354,7 @@ class TerminalScraper:
 				self.current_trains.pop(c, 0)
 			# self.scrape_trains(scrape_trains)
 			if not (loop_count % 50):
-				print "loop count:", loop_count
+				print("loop count: {}".format(loop_count))
 			loop_count = loop_count + 1
 			time.sleep(10)
 
