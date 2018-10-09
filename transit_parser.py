@@ -39,6 +39,7 @@ class TrainParser:
 		self.num_lines_parsed = 0
 		self.corrupted = False
 		self.pages_parsed = 0
+		self.num_lines_in_page = -1
 
 	def read_file(self, filename):
 		try:
@@ -49,7 +50,13 @@ class TrainParser:
 
 	def check_page_valid(self, page):
 		# len 3 --> two stops + empty string
+		if self.num_lines_in_page == -1:
+			self.num_lines_in_page = len(page)
 		if len(page) < 3:
+			return False
+		if len(page) < self.num_lines_in_page:
+			self.corrupted = True
+			print(self.filename, "corrupted status page", self.pages_parsed)
 			return False
 		return True
 
@@ -181,7 +188,7 @@ class TrainParser:
 		for idx, line in enumerate(page_lines):
 			if self.num_lines_parsed <= idx:
 				break
-			print("update", idx, line, len(self.departures))
+			# print("update", idx, line, len(self.departures))
 			departed_stop = self.parse_status_line_if_departed(line)
 			if departed_stop:
 				updated = self.update_departure(departed_stop)
@@ -191,13 +198,15 @@ class TrainParser:
 			else:
 				# marked as not departed, revise state
 				self.num_lines_parsed = idx
+				station, status = self.parse_station_and_status(line)
+				self.departed_stations.pop(station, None)
 		self.departures = self.departures[:self.num_lines_parsed]
 
 		#check SM
 		try:
 
 			for idx, line in enumerate(page_lines[self.num_lines_parsed:]):
-				print("check", idx, line)
+				# print("check", idx, line)
 				# next_line = page_lines[len(self.departures)]
 				departed_stop = self.parse_status_line_if_departed(line)
 				if departed_stop is not None:
