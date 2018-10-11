@@ -33,7 +33,10 @@ class TrainParser:
 		self.type = self.data['type']
 		self.scheduled = self.data['scheduled']
 		self.created_at = self.data['created_at']
-		self.created_dt = datetime.strptime(self.created_at, "%Y-%m-%d %H:%M:%S.%f")
+		try:
+			self.created_dt = datetime.strptime(self.created_at, "%Y-%m-%d %H:%M:%S.%f")
+		except ValueError:
+			self.created_dt = datetime.strptime(self.created_at, "%Y-%m-%d %H:%M:%S")
 		self.departures = []
 		self.departed_stations = {}
 		self.num_lines_parsed = 0
@@ -56,7 +59,7 @@ class TrainParser:
 			return False
 		if len(page) < self.num_lines_in_page:
 			self.corrupted = True
-			print(self.filename, "corrupted status page", self.pages_parsed)
+			# print(self.filename, "corrupted status page", self.pages_parsed)
 			return False
 		return True
 
@@ -64,7 +67,7 @@ class TrainParser:
 		first_status_page = self.data['data'][0][1]
 		if not self.check_page_valid(first_status_page):
 			self.corrupted = True
-			print(self.filename, "corrupted empty")
+			# print(self.filename, "corrupted empty")
 			return True
 		return False
 
@@ -125,10 +128,10 @@ class TrainParser:
 		if station in self.departed_stations:
 			departure_idx = self.departed_stations[station]
 			prev_departure_status = self.departures[departure_idx]['status']
-			if prev_departure_status != new_departure['status']:
-				self.departures[departure_idx].update(new_departure)
+			if (prev_departure_status == "departed") and not (new_departure['status'] == "departed"):
+				#self.departures[departure_idx].update(new_departure)
 				return "updated"
-			return "no change"
+			return "not updated"
 		return "outside station"
 
 	def append_departure(self, departed_stop):
@@ -185,26 +188,29 @@ class TrainParser:
 		page_lines = self.get_relevant_stations(page_lines)
 
 		#update SM
-		for idx, line in enumerate(page_lines):
-			if self.num_lines_parsed <= idx:
-				break
-			# print("update", idx, line, len(self.departures))
-			departed_stop = self.parse_status_line_if_departed(line)
-			if departed_stop:
-				updated = self.update_departure(departed_stop)
-				if updated == "updated":
-					# departure status changed, revise state
-					self.num_lines_parsed = idx + 1
-			else:
-				# marked as not departed, revise state
-				self.num_lines_parsed = idx
-				station, status = self.parse_station_and_status(line)
-				self.departed_stations.pop(station, None)
-		self.departures = self.departures[:self.num_lines_parsed]
+		try:
+			for idx, line in enumerate(page_lines):
+				if self.num_lines_parsed <= idx:
+					break
+				# print("update", idx, line, len(self.departures))
+				departed_stop = self.parse_status_line_if_departed(line)
+				if departed_stop:
+					updated = self.update_departure(departed_stop)
+					if updated == "updated":
+						# departure status changed, revise state
+						self.num_lines_parsed = idx + 1
+				else:
+					# marked as not departed, revise state
+					self.num_lines_parsed = idx
+					# station, status = self.parse_station_and_status(line)
+					# self.departed_stations.pop(station, None)
+			
+			for dep in self.departures[self.num_lines_parsed:]:
+				self.departed_stations.pop(dep["station"])
+			
+			self.departures = self.departures[:self.num_lines_parsed]
 
 		#check SM
-		try:
-
 			for idx, line in enumerate(page_lines[self.num_lines_parsed:]):
 				# print("check", idx, line)
 				# next_line = page_lines[len(self.departures)]
@@ -216,7 +222,8 @@ class TrainParser:
 				else:
 					break
 		except IndexError:
-			pass
+			self.corrupted = True
+			# print(self.filename, "corrupted index error")
 		# for idx, line in enumerate(page_lines):
 		# 	departed_stop = self.parse_status_line_if_departed(line)
 		# 	if departed_stop is not None:
@@ -247,7 +254,7 @@ class TrainParser:
 		approx_time = self.approximate_time(estimated_stop['status'], time_scraped)
 		if approx_time is not None:
 			estimated_stop['time'] = approx_time
-			estimated_stop['status'] = 'departed'
+			estimated_stop['status'] = 'estimated'
 			return estimated_stop
 		return None
 
@@ -289,11 +296,14 @@ class TrainParser:
 			self.pages_parsed = self.pages_parsed + 1
 			if self.corrupted:
 				break
+		if not len(self.departures):
+			self.corrupted = True
+			# print(self.filename, "corrupted no departures")
 		if not self.corrupted:
 			if self.type == "NJ Transit":
 				self.fill_missing_departures_with_estimates()
 				self.estimate_last_departure()
-			self.update_departures_if_cancelled()
+			# self.update_departures_if_cancelled()
 		else:
 			self.departures = []
 
@@ -357,12 +367,12 @@ class TrainParser:
 
 	def check_df_valid(self, df):
 		if df is None:
-			print("not valid none", self.filename)
+			# print("not valid none", self.filename)
 			return False
 		num_stops = len(df)
 		valid_len = ((df['from'].nunique() + 1) == num_stops) & (df['to'].nunique() == num_stops)
-		if not valid_len:
-			print("not valid len", self.filename)
+		# if not valid_len:
+			# print("not valid len", self.filename)
 		return valid_len
  
 class DayParser:
@@ -386,7 +396,7 @@ class DayParser:
 	
 	def get_train_obj(self, filename):
 		train_filename = self.path + filename
-		print(train_filename)
+		# print(train_filename)
 		return TrainParser(train_filename)
 
 	def parse_train(self, train):
@@ -475,7 +485,7 @@ def write_s3_obj_to_disk(s3_obj, directory):
 	"""
 	filename = s3_obj.key.split("/")[-1]
 	data = s3_obj.get()['Body'].read()
-	outfile = open(directory + filename, 'a')
+	outfile = open(directory + filename, 'wb')
 	outfile.write(data)
 	outfile.close()
 
