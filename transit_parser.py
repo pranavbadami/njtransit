@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import boto3
 import os
 from os.path import isfile, join
+from pathlib import Path
 
 s3 = boto3.resource('s3')
 
@@ -41,6 +42,7 @@ class TrainParser:
 		self.departed_stations = {}
 		self.num_lines_parsed = 0
 		self.corrupted = False
+		self.corrupted_reason = ""
 		self.pages_parsed = 0
 		self.num_lines_in_page = -1
 
@@ -59,6 +61,7 @@ class TrainParser:
 			return False
 		if len(page) < self.num_lines_in_page:
 			self.corrupted = True
+			self.corrupted_reason = "missing state"
 			# print(self.filename, "corrupted status page", self.pages_parsed)
 			return False
 		return True
@@ -67,6 +70,7 @@ class TrainParser:
 		first_status_page = self.data['data'][0][1]
 		if not self.check_page_valid(first_status_page):
 			self.corrupted = True
+			self.corrupted_reason = "empty file"
 			# print(self.filename, "corrupted empty")
 			return True
 		return False
@@ -223,16 +227,7 @@ class TrainParser:
 					break
 		except IndexError:
 			self.corrupted = True
-			# print(self.filename, "corrupted index error")
-		# for idx, line in enumerate(page_lines):
-		# 	departed_stop = self.parse_status_line_if_departed(line)
-		# 	if departed_stop is not None:
-		# 		if idx > len(self.departures):
-		# 			print(self.filename, "corrupted at ", idx, len(self.departures))
-		# 			self.corrupted = True
-		# 			break
-		# 		departed_stop['time'] = time_scraped
-		# 		self.append_or_update_departure(departed_stop)
+			self.corrupted_reason = "parser error"
 
 	def get_last_page_with_time_estimate(self, line_idx):
 		time_in_line = False
@@ -298,6 +293,7 @@ class TrainParser:
 				break
 		if not len(self.departures):
 			self.corrupted = True
+			self.corrupted_reason = "no departures"
 			# print(self.filename, "corrupted no departures")
 		if not self.corrupted:
 			if self.type == "NJ Transit":
@@ -427,8 +423,9 @@ class DayParser:
 			if train_df is not None:
 				all_trains.append(train_df)
 			else:
-				self.invalid_trains.append(train)
+				self.invalid_trains.append(train_obj)
 		self.all_trains_df = pd.concat(all_trains, ignore_index=True)
+		self.log_invalid_trains()
 
 	def write_day_to_disk(self, print_results=True):
 		"""Write dataframe of vaid parsed trains to disk.
@@ -457,9 +454,19 @@ class DayParser:
 		"""
 		counts = self.get_parsed_counts()
 		print("successfully parsed", counts['valid'], "trains for", self.day)
-		print(len(self.invalid_trains), "invalid trains for", self.day)
-		print(self.invalid_trains)
+		print(counts["invalid"], "invalid trains for", self.day)
 
+	def log_invalid_trains(self):
+		log_path = "{}invalid_trains.csv".format(self.csv_path)
+		log_file = Path(log_path)
+		if not log_file.is_file():
+			log = open(log_path, "w")
+			log.write("date, train_id, reason\n")
+		else:
+			log = open(log_path, "a")
+		for train_obj in self.invalid_trains:
+			log.write("{}, {}, {}\n".format(self.day, train_obj.train, train_obj.corrupted_reason))
+		log.close()
 
 ################################################################################
 # HELPER METHODS
@@ -516,6 +523,12 @@ def parse_days(days, path='scraped_trains/'):
 		d.parse_all_trains()
 		d.write_day_to_disk()
 		print("completed parsing {}".format(date_string))
+
+def parse_date_range(start_date, end_date):
+	days = []
+	while start_date < end_date:
+		days.append(datetime.strptime(start_date, "%Y_%m_%d"))
+		start_date = start_date + timedelta(days=1)
 
 def download_and_parse_days(days, path='./scraped_data/', prefix=''):
 	"""Download and parse train files for days.
