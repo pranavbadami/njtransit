@@ -461,11 +461,11 @@ class DayParser:
 		log_file = Path(log_path)
 		if not log_file.is_file():
 			log = open(log_path, "w")
-			log.write("date, train_id, reason\n")
+			log.write("date,train_id,reason\n")
 		else:
 			log = open(log_path, "a")
 		for train_obj in self.invalid_trains:
-			log.write("{}, {}, {}\n".format(self.day, train_obj.train, train_obj.corrupted_reason))
+			log.write("{},{},{}\n".format(self.day, train_obj.train, train_obj.corrupted_reason))
 		log.close()
 
 ################################################################################
@@ -523,12 +523,6 @@ def parse_days(days, path='scraped_trains/'):
 		d.parse_all_trains()
 		d.write_day_to_disk()
 		print("completed parsing {}".format(date_string))
-
-def parse_date_range(start_date, end_date):
-	days = []
-	while start_date < end_date:
-		days.append(datetime.strptime(start_date, "%Y_%m_%d"))
-		start_date = start_date + timedelta(days=1)
 
 def download_and_parse_days(days, path='./scraped_data/', prefix=''):
 	"""Download and parse train files for days.
